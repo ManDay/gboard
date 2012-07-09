@@ -1,0 +1,13 @@
+cmake_minimum_required( VERSION 2.8 )
+
+project( GBoard C )
+
+include( FindPkgConfig )
+
+pkg_check_modules( GTK REQUIRED gtk+-3.0 )
+
+include_directories( ${GTK_INCLUDE_DIRS} )
+link_directories( ${GTK_LIBRARY_DIRS} )
+
+add_executable( gboard src/main.c src/classes/app.c )
+target_link_libraries( gboard ${GTK_LDFLAGS} )
