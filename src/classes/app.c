@@ -19,6 +19,10 @@ static void activate( GApplication* );
 static gboolean dbus_register( GApplication*,GDBusConnection*,const gchar*,GError** );
 static void dbus_unregister( GApplication*,GDBusConnection*,const gchar* );
 
+static void dbus_method_call( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GDBusMethodInvocation*,gpointer );
+static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GError*,gpointer );
+static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
+
 static void class_init( GbdAppClass* klass,gpointer udata ) {
 	GApplicationClass* klass_ga = G_APPLICATION_CLASS( klass );
 	GObjectClass* klass_go = G_OBJECT_CLASS( klass );
@@ -48,17 +52,57 @@ static void startup( GApplication* _self ) {
 
 	GbdAppPrivate* const priv = GBD_APP( _self )->priv;
 
+	g_print( "Activating GBoard\n" );
+	g_application_hold( _self );
 	priv->tray = gtk_status_icon_new_from_stock( GTK_STOCK_EDIT );
 }
 
 static void activate( GApplication* _self ) {
-	g_application_hold( _self );
+	G_APPLICATION_CLASS( g_type_class_peek( GTK_TYPE_APPLICATION ) )->activate( _self );
 }
 
 static gboolean dbus_register( GApplication* _self,GDBusConnection* conn,const gchar* dbapi,GError** error ) {
+	if( !conn ) {
+		g_printerr( "Could not obtain connection on the bus\n" );
+		g_application_quit( _self );
+	}
+
+// TODO : Should be expressed as structs, not included and parsed
+	GError* err = NULL;
+#include "../dbus_introspection.xml.c"
+	GDBusNodeInfo* info;
+	
+	if( !( info = g_dbus_node_info_new_for_xml( introspection_xml,&err ) ) ) {
+		g_print( "Error parsing XML Introspection Data: %s\n",err->message );
+		exit( 1 );
+	}
+
+	GDBusInterfaceVTable vtable = { 
+		(GDBusInterfaceMethodCallFunc)dbus_method_call,
+		(GDBusInterfaceGetPropertyFunc)dbus_property_get,
+		(GDBusInterfaceSetPropertyFunc)dbus_property_set
+	};
+
+	g_dbus_connection_register_object( conn,info->path,info->interfaces[ 0 ],&vtable,_self,NULL,NULL );
 }
 
 static void dbus_unregister( GApplication* _self,GDBusConnection* conn,const gchar* dbapi ) {
+}
+
+static void dbus_method_call( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* method,GVariant* parms,GDBusMethodInvocation* inv,gpointer udata ) {
+	g_print( "Method %s invoked\n",method );
+
+	if( !g_strcmp0( method,"Open" ) ) {
+		g_dbus_method_invocation_return_value( inv,NULL );
+	} else if( !g_strcmp0( method,"Close" ) ) {
+		g_dbus_method_invocation_return_value( inv,NULL );
+	}
+}
+
+static GVariant* dbus_property_get( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GError* err,gpointer udata ) {
+}
+
+static gboolean* dbus_property_set( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GVariant* val,GError* err,gpointer udata ) {
 }
 
 GType gbd_app_get_type( ) {
@@ -79,15 +123,10 @@ GType gbd_app_get_type( ) {
 }
 
 GbdApp* gbd_app_new( ) {
+	GbdApp* self = g_object_new( GBD_TYPE_APP,"application-id",GBD_NAME,"flags",G_APPLICATION_IS_SERVICE,NULL );
 
 	// TODO : Move into dbus_register with Glib-2.34
-	GDBusConnection* conn = g_bus_get_sync( G_BUS_TYPE_SESSION,NULL,NULL );
-	if( !conn ) {
-		g_printerr( "Could not obtain connection on the bus\n" );
-		exit( 1 );
-	}
-	// Register Objects
-	GbdApp* self = g_object_new( GBD_TYPE_APP,"application-id",GBD_NAME,"flags",G_APPLICATION_IS_SERVICE,NULL );
+	dbus_register( G_APPLICATION( self ),g_bus_get_sync( G_BUS_TYPE_SESSION,NULL,NULL ),NULL,NULL );
 
 	return self;
 }

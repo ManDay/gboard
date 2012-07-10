@@ -11,3 +11,6 @@ link_directories( ${GTK_LIBRARY_DIRS} )
 
 add_executable( gboard src/main.c src/classes/app.c )
 target_link_libraries( gboard ${GTK_LDFLAGS} )
+
+add_library( gboard_im MODULE src/gboard_im.c )
+target_link_libraries( gboard ${GTK_LDFLAGS} )
