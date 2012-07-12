@@ -28,6 +28,7 @@ typedef struct {
 	GbdImMode mode;
 	GDBusProxy* board;
 	GdkWindow* client;
+	GtkWidget* launcher;
 }	GbdIM;
 
 GtkIMContextInfo* clist[ ]= {
@@ -45,6 +46,8 @@ static void instance_finalize( GbdIM* self );
 static void set_client_window( GtkIMContext*,GdkWindow* );
 static void focus_in( GtkIMContext* );
 static void focus_out( GtkIMContext* );
+
+static void show_launcher( GbdIM* );
 
 static void proxy_aquired( GObject* src,GAsyncResult* res,GbdIM* self ) {
 	self->board = g_dbus_proxy_new_for_bus_finish( res,NULL );
@@ -70,8 +73,9 @@ static void class_init( GbdIMClass* klass,gpointer udata ) {
 static void instance_init( GbdIM* self ) {
 	g_print( "GbdIM %p: Initialized, aquiring proxy\n",self );
 
-	g_dbus_proxy_new_for_bus( G_BUS_TYPE_SESSION,G_DBUS_PROXY_FLAGS_NONE,NULL,GBD_NAME,GBD_PATH,GBD_NAME,NULL,(GAsyncReadyCallback)proxy_aquired,self );
+	self->launcher = NULL;
 
+	g_dbus_proxy_new_for_bus( G_BUS_TYPE_SESSION,G_DBUS_PROXY_FLAGS_NONE,NULL,GBD_NAME,GBD_PATH,GBD_NAME,NULL,(GAsyncReadyCallback)proxy_aquired,self );
 }
 
 static void instance_finalize( GbdIM* self ) {
@@ -93,15 +97,25 @@ static void focus_in( GtkIMContext* _self ) {
 	g_print( "GbdIM %p: Focus In\n",self );
 
 	GVariant* visible = g_dbus_proxy_get_cached_property( self->board,"Visible" );
-
 	guchar visibility = g_variant_get_byte( visible );
 	g_variant_unref( visible );
 
-	g_print( "GbdIM %p: Visibility %s\n",self,visible==0?"None":"Yes" );
+	if( !visible )
+		show_launcher( self );
 }
 
 static void focus_out( GtkIMContext* self ) {
 	g_print( "GbdIM %p: Focus Out\n",self );
+}
+
+static void show_launcher( GbdIM* self ) {
+	if( !self->launcher ) {
+		self->launcher = gtk_window_new( GTK_WINDOW_POPUP );
+	}
+
+	gtk_widget_set_size_request( self->launcher,20,40 );
+
+	gtk_widget_show( self->launcher );
 }
 
 void im_module_init( GTypeModule* module ) {

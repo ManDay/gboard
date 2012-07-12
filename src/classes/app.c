@@ -10,6 +10,18 @@ struct GbdAppPrivate {
 	guchar visibility;
 };
 
+GDBusSignalInfo* sinfo[ ] = {
+	&(GDBusSignalInfo){ -1,"Submit",(GDBusArgInfo*[ ]){ &(GDBusArgInfo){ -1,"Text","s" },NULL } },
+	NULL
+};
+
+GDBusPropertyInfo* pinfo[ ] = {
+	&(GDBusPropertyInfo){ -1,"Visible","y",G_DBUS_PROPERTY_INFO_FLAGS_READABLE },
+	NULL
+};
+
+GDBusInterfaceInfo iinfo = { -1,GBD_NAME,NULL,sinfo,pinfo,NULL };
+
 static void class_init( GbdAppClass*,gpointer );
 static void instance_init( GbdApp* );
 static void instance_finalize( GbdApp* );
@@ -74,18 +86,6 @@ static void activate( GApplication* _self ) {
 
 static gboolean dbus_register( GApplication* _self,GDBusConnection* conn,const gchar* dbapi,GError** error ) {
 	g_assert( conn );
-
-	GDBusSignalInfo* sinfo[ ] = {
-		&(GDBusSignalInfo){ -1,"Submit",(GDBusArgInfo*[ ]){ &(GDBusArgInfo){ -1,"Text","s" },NULL } },
-		NULL
-	};
-
-	GDBusPropertyInfo* pinfo[ ] = {
-		&(GDBusPropertyInfo){ -1,"Visible","y",G_DBUS_PROPERTY_INFO_FLAGS_READABLE },
-		NULL
-	};
-
-	GDBusInterfaceInfo iinfo = { -1,GBD_NAME,NULL,sinfo,pinfo,NULL };
 
 	GDBusInterfaceVTable vtable = { 
 		NULL,
