@@ -7,21 +7,23 @@
 
 struct GbdAppPrivate {
 	GtkStatusIcon* tray;
+	guchar visibility;
 };
 
 static void class_init( GbdAppClass*,gpointer );
 static void instance_init( GbdApp* );
-
-static void dispose( GObject* );
+static void instance_finalize( GbdApp* );
 
 static void startup( GApplication* );
 static void activate( GApplication* );
 static gboolean dbus_register( GApplication*,GDBusConnection*,const gchar*,GError** );
 static void dbus_unregister( GApplication*,GDBusConnection*,const gchar* );
 
-static void dbus_method_call( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GDBusMethodInvocation*,gpointer );
 static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GError*,gpointer );
 static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
+
+static void show_board( GSimpleAction*,GVariant*,gpointer );
+static void hide_board( GSimpleAction*,GVariant*,gpointer );
 
 static void class_init( GbdAppClass* klass,gpointer udata ) {
 	GApplicationClass* klass_ga = G_APPLICATION_CLASS( klass );
@@ -29,7 +31,7 @@ static void class_init( GbdAppClass* klass,gpointer udata ) {
 
 	g_type_class_add_private( klass,sizeof( GbdAppPrivate ) );
 
-	klass_go->dispose = dispose;
+	klass_go->finalize = (GObjectFinalizeFunc)instance_finalize;
 
 	klass_ga->startup = startup;
 	klass_ga->activate = activate;
@@ -41,10 +43,19 @@ static void class_init( GbdAppClass* klass,gpointer udata ) {
 
 static void instance_init( GbdApp* self ) {
 	self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_APP,GbdAppPrivate );
+
+	GActionEntry actions[ ]= {
+		{ "Show",show_board,"y" },
+		{ "Hide",hide_board,"b" }
+	};
+
+	self->priv->visibility = 0;
+
+	g_action_map_add_action_entries( G_ACTION_MAP( self ),actions,2,self );
 }
 
-static void dispose( GObject* _self ) {
-	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->dispose( _self );
+static void instance_finalize( GbdApp* self ) {
+	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->finalize( G_OBJECT( self ) );
 }
 
 static void startup( GApplication* _self ) {
@@ -62,47 +73,51 @@ static void activate( GApplication* _self ) {
 }
 
 static gboolean dbus_register( GApplication* _self,GDBusConnection* conn,const gchar* dbapi,GError** error ) {
-	if( !conn ) {
-		g_printerr( "Could not obtain connection on the bus\n" );
-		g_application_quit( _self );
-	}
+	g_assert( conn );
 
-// TODO : Should be expressed as structs, not included and parsed
-	GError* err = NULL;
-#include "../dbus_introspection.xml.c"
-	GDBusNodeInfo* info;
-	
-	if( !( info = g_dbus_node_info_new_for_xml( introspection_xml,&err ) ) ) {
-		g_print( "Error parsing XML Introspection Data: %s\n",err->message );
-		exit( 1 );
-	}
+	GDBusSignalInfo* sinfo[ ] = {
+		&(GDBusSignalInfo){ -1,"Submit",(GDBusArgInfo*[ ]){ &(GDBusArgInfo){ -1,"Text","s" },NULL } },
+		NULL
+	};
+
+	GDBusPropertyInfo* pinfo[ ] = {
+		&(GDBusPropertyInfo){ -1,"Visible","y",G_DBUS_PROPERTY_INFO_FLAGS_READABLE },
+		NULL
+	};
+
+	GDBusInterfaceInfo iinfo = { -1,GBD_NAME,NULL,sinfo,pinfo,NULL };
 
 	GDBusInterfaceVTable vtable = { 
-		(GDBusInterfaceMethodCallFunc)dbus_method_call,
+		NULL,
 		(GDBusInterfaceGetPropertyFunc)dbus_property_get,
 		(GDBusInterfaceSetPropertyFunc)dbus_property_set
 	};
 
-	g_dbus_connection_register_object( conn,info->path,info->interfaces[ 0 ],&vtable,_self,NULL,NULL );
+	g_dbus_connection_register_object( conn,GBD_PATH,&iinfo,&vtable,_self,NULL,NULL );
 }
 
 static void dbus_unregister( GApplication* _self,GDBusConnection* conn,const gchar* dbapi ) {
 }
 
-static void dbus_method_call( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* method,GVariant* parms,GDBusMethodInvocation* inv,gpointer udata ) {
-	g_print( "Method %s invoked\n",method );
+static GVariant* dbus_property_get( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GError* err,gpointer _self ) {
+	GbdAppPrivate* priv = GBD_APP( _self )->priv;
 
-	if( !g_strcmp0( method,"Open" ) ) {
-		g_dbus_method_invocation_return_value( inv,NULL );
-	} else if( !g_strcmp0( method,"Close" ) ) {
-		g_dbus_method_invocation_return_value( inv,NULL );
-	}
+	if( !g_strcmp0( prop,"Visible" ) )
+		return g_variant_new( "y",priv->visibility );
+
+	return NULL;
 }
 
-static GVariant* dbus_property_get( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GError* err,gpointer udata ) {
+static gboolean* dbus_property_set( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GVariant* val,GError* err,gpointer _self ) {
+	// Nothing to see here, move along
 }
 
-static gboolean* dbus_property_set( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GVariant* val,GError* err,gpointer udata ) {
+static void show_board( GSimpleAction* action,GVariant* parms,gpointer _self ) {
+	g_print( "Showing\n" );
+}
+
+static void hide_board( GSimpleAction* action,GVariant* parms,gpointer _self ) {
+	g_print( "Hiding\n" );
 }
 
 GType gbd_app_get_type( ) {
@@ -115,7 +130,6 @@ GType gbd_app_get_type( ) {
 			sizeof( GbdApp ),0,
 			(GInstanceInitFunc)instance_init,
 			NULL
-
 		};
 		type = g_type_register_static( GTK_TYPE_APPLICATION,"GbdApp",&info,0 );
 	}

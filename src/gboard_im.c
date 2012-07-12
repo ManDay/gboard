@@ -1,6 +1,8 @@
 #include <gtk/gtk.h>
 #include <gtk/gtkimmodule.h>
 
+#include "config.h"
+
 /// Return GType; Return Class
 #define GBD_TYPE_IM (gbd_im_get_type( ))
 #define GBD_IM_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS( (obj),GBD_TYPE_IM,GbdIMClass ))
@@ -24,6 +26,8 @@ typedef GtkIMContextClass GbdIMClass;
 typedef struct {
 	GtkIMContext parent;
 	GbdImMode mode;
+	GDBusProxy* board;
+	GdkWindow* client;
 }	GbdIM;
 
 GtkIMContextInfo* clist[ ]= {
@@ -32,35 +36,72 @@ GtkIMContextInfo* clist[ ]= {
 	&(GtkIMContextInfo){ "gboard_pen","GBoard (pen)","gboard","","*" }
 };
 
+GType type = 0;
+
 static void class_init( GbdIMClass*,gpointer );
+static void instance_init( GbdIM* self );
+static void instance_finalize( GbdIM* self );
+
+static void set_client_window( GtkIMContext*,GdkWindow* );
+static void focus_in( GtkIMContext* );
+static void focus_out( GtkIMContext* );
+
+static void proxy_aquired( GObject* src,GAsyncResult* res,GbdIM* self ) {
+	self->board = g_dbus_proxy_new_for_bus_finish( res,NULL );
+
+	g_print( "GbdIM %p: Proxy %p aquired\n",self,self->board );
+}
 
 static GType gbd_im_get_type( ) {
-	static GType type = 0;
-	if( !type ) {
-		type = g_type_from_name( "GbdIM" );
-	}
 	return type;
-}
-
-static void set_client_window( GtkIMContext* self,GdkWindow* win ) {
-	g_print( "GbdIM %p: Client Window changed to %p\n",self,win );
-}
-
-static void focus_in( GtkIMContext* self ) {
-	g_print( "GbdIM %p: Focus In\n",self );
-}
-
-static void focus_out( GtkIMContext* self ) {
-	g_print( "GbdIM %p: Focus Out\n",self );
 }
 
 static void class_init( GbdIMClass* klass,gpointer udata ) {
 	GObjectClass* klass_go = G_OBJECT_CLASS( klass );
 	GtkIMContextClass* klass_ic = GTK_IM_CONTEXT_CLASS( klass );
 
+	klass_go->finalize = (GObjectFinalizeFunc)instance_finalize;
+
 	klass_ic->set_client_window = set_client_window;
 	klass_ic->focus_in = focus_in;
 	klass_ic->focus_out = focus_out;
+}
+
+static void instance_init( GbdIM* self ) {
+	g_print( "GbdIM %p: Initialized, aquiring proxy\n",self );
+
+	g_dbus_proxy_new_for_bus( G_BUS_TYPE_SESSION,G_DBUS_PROXY_FLAGS_NONE,NULL,GBD_NAME,GBD_PATH,GBD_NAME,NULL,(GAsyncReadyCallback)proxy_aquired,self );
+
+}
+
+static void instance_finalize( GbdIM* self ) {
+	g_print( "GbdIM %p: Finalized\n",self );
+
+	G_OBJECT_CLASS( g_type_class_peek( GTK_TYPE_IM_CONTEXT ) )->dispose( G_OBJECT( self ) );
+}
+
+static void set_client_window( GtkIMContext* _self,GdkWindow* win ) {
+	GbdIM* self = GBD_IM( _self );
+	g_print( "GbdIM %p: Client Window changed to %p\n",self,win );
+
+	self->client = win;
+
+}
+
+static void focus_in( GtkIMContext* _self ) {
+	GbdIM* self = GBD_IM( _self );
+	g_print( "GbdIM %p: Focus In\n",self );
+
+	GVariant* visible = g_dbus_proxy_get_cached_property( self->board,"Visible" );
+
+	guchar visibility = g_variant_get_byte( visible );
+	g_variant_unref( visible );
+
+	g_print( "GbdIM %p: Visibility %s\n",self,visible==0?"None":"Yes" );
+}
+
+static void focus_out( GtkIMContext* self ) {
+	g_print( "GbdIM %p: Focus Out\n",self );
 }
 
 void im_module_init( GTypeModule* module ) {
@@ -69,11 +110,11 @@ void im_module_init( GTypeModule* module ) {
 		NULL,NULL,
 		(GClassInitFunc)class_init,NULL,NULL,
 		sizeof( GbdIM ),0,
-		NULL,
+		(GInstanceInitFunc)instance_init,
 		NULL
 	};
 
-	g_type_module_register_type( module,GTK_TYPE_IM_CONTEXT,"GbdIM",&info,0 );
+	type = g_type_module_register_type( module,GTK_TYPE_IM_CONTEXT,"GbdIM",&info,0 );
 }
 
 void im_module_exit( ) {
