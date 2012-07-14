@@ -156,7 +156,7 @@ static void show_launcher( GbdIM* self ) {
 }
 
 static void launch_gboard( GtkButton* button,GbdIM* self ) {
-
+	g_action_group_activate_action( G_ACTION_GROUP( self->boardactions ),"Show",g_variant_new( "y",1 ) );
 }
 
 // TODO : Part of FIXME TODO for updating GDBusActionGroup correctly
