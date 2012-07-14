@@ -29,6 +29,8 @@ typedef struct {
 	GDBusProxy* board;
 	GdkWindow* client;
 	GtkWidget* launcher;
+	GDBusActionGroup* boardactions;
+	gboolean actions_ready;
 }	GbdIM;
 
 GtkIMContextInfo* clist[ ]= {
@@ -47,13 +49,10 @@ static void set_client_window( GtkIMContext*,GdkWindow* );
 static void focus_in( GtkIMContext* );
 static void focus_out( GtkIMContext* );
 
+static void proxy_aquired( GObject*,GAsyncResult*,GbdIM* );
 static void show_launcher( GbdIM* );
-
-static void proxy_aquired( GObject* src,GAsyncResult* res,GbdIM* self ) {
-	self->board = g_dbus_proxy_new_for_bus_finish( res,NULL );
-
-	g_print( "GbdIM %p: Proxy %p aquired\n",self,self->board );
-}
+static void launch_gboard( GtkButton*,GbdIM* );
+static void boardactions_verify( GActionGroup*,gchar*,GbdIM* );
 
 static GType gbd_im_get_type( ) {
 	return type;
@@ -74,12 +73,18 @@ static void instance_init( GbdIM* self ) {
 	g_print( "GbdIM %p: Initialized, aquiring proxy\n",self );
 
 	self->launcher = NULL;
+	self->actions_ready = FALSE;
 
 	g_dbus_proxy_new_for_bus( G_BUS_TYPE_SESSION,G_DBUS_PROXY_FLAGS_NONE,NULL,GBD_NAME,GBD_PATH,GBD_NAME,NULL,(GAsyncReadyCallback)proxy_aquired,self );
 }
 
 static void instance_finalize( GbdIM* self ) {
 	g_print( "GbdIM %p: Finalized\n",self );
+
+	if( self->launcher )
+		gtk_widget_destroy( self->launcher );
+	g_object_unref( self->board );
+	g_object_unref( self->boardactions );
 
 	G_OBJECT_CLASS( g_type_class_peek( GTK_TYPE_IM_CONTEXT ) )->dispose( G_OBJECT( self ) );
 }
@@ -94,28 +99,84 @@ static void set_client_window( GtkIMContext* _self,GdkWindow* win ) {
 
 static void focus_in( GtkIMContext* _self ) {
 	GbdIM* self = GBD_IM( _self );
-	g_print( "GbdIM %p: Focus In\n",self );
 
+	if( self->board ) {
 	GVariant* visible = g_dbus_proxy_get_cached_property( self->board,"Visible" );
-	guchar visibility = g_variant_get_byte( visible );
-	g_variant_unref( visible );
+		if( visible ) {
+			if( self->actions_ready ) {
+				guchar visibility = g_variant_get_byte( visible );
+				g_variant_unref( visible );
 
-	if( !visible )
-		show_launcher( self );
+				if( !visibility )
+					show_launcher( self );
+			} else
+				g_printerr( "GBoard IM: GBoard did not report the required actions (yet):\n" );
+		} else
+			g_printerr( "GBoard IM: GBoard could not be contacted (yet)\n" );
+	} else
+		g_printerr( "GBoard IM: Proxy to GBoard could not be generated\n" );
 }
 
-static void focus_out( GtkIMContext* self ) {
-	g_print( "GbdIM %p: Focus Out\n",self );
+static void focus_out( GtkIMContext* _self ) {
+	GbdIM* self = GBD_IM( _self );
+
+	if( self->launcher )
+		gtk_widget_hide( self->launcher );
 }
 
 static void show_launcher( GbdIM* self ) {
 	if( !self->launcher ) {
 		self->launcher = gtk_window_new( GTK_WINDOW_POPUP );
+		GtkWidget* button = gtk_button_new_with_label( "GBoard" );
+
+		gtk_container_add( GTK_CONTAINER( self->launcher ),button );
+		g_signal_connect( button,"clicked",(GCallback)launch_gboard,self );
+
+		gtk_widget_show( button );
 	}
+	
+	gint x,y,w,h;
+	gtk_window_get_size( GTK_WINDOW( self->launcher ),&w,&h );
+	gdk_window_get_origin( self->client,&x,&y );
 
-	gtk_widget_set_size_request( self->launcher,20,40 );
+	cairo_region_t* reg = gdk_window_get_visible_region( self->client );
+	cairo_rectangle_int_t rec;
+	cairo_region_get_rectangle( reg,0,&rec );
+	cairo_region_destroy( reg );
 
+	gtk_window_move( GTK_WINDOW( self->launcher ),x,y+rec.height );
 	gtk_widget_show( self->launcher );
+}
+
+static void launch_gboard( GtkButton* button,GbdIM* self ) {
+
+}
+
+static void proxy_aquired( GObject* src,GAsyncResult* res,GbdIM* self ) {
+	self->board = g_dbus_proxy_new_for_bus_finish( res,NULL );
+	self->boardactions = g_dbus_action_group_get( g_dbus_proxy_get_connection( self->board ),GBD_NAME,GBD_PATH );
+
+	g_signal_connect( self->boardactions,"action-added",(GCallback)boardactions_verify,self );
+
+	// According to Spec, ActionGroup may already be populated
+	boardactions_verify( G_ACTION_GROUP( self->boardactions ),NULL,self );
+	
+/* FIXME TODO : GDBusActionGroup has some *very* bizarre and seemingly
+ * highly defective policy for updating its knowledge about the
+ * remote's capabilities. E.g.: It does not attempt to update its
+ * "cache" by itsself, but only if list_actions or query_actions is
+ * inquired. Even further: query_actions refetches the information if a
+ * certain action is not found in its cache, yet returns FALSE, as if
+ * the action ultimately did not exist.
+ * For the time being, we make the GDBusActioGroup inquire the remote by
+ * asking for a list of actions (which initially returns as empty but
+ * subsequently will cause the proper update).
+ */
+	g_strfreev( g_action_group_list_actions( G_ACTION_GROUP( self->boardactions ) ) );
+}
+
+static void boardactions_verify( GActionGroup* grp,gchar* act,GbdIM* self ) {
+	self->actions_ready = g_action_group_has_action( grp,"Show" )&& g_action_group_has_action( grp,"Hide" );
 }
 
 void im_module_init( GTypeModule* module ) {

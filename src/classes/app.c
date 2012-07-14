@@ -56,13 +56,12 @@ static void class_init( GbdAppClass* klass,gpointer udata ) {
 static void instance_init( GbdApp* self ) {
 	self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_APP,GbdAppPrivate );
 
+	self->priv->visibility = 0;
+
 	GActionEntry actions[ ]= {
 		{ "Show",show_board,"y" },
 		{ "Hide",hide_board,"b" }
 	};
-
-	self->priv->visibility = 0;
-
 	g_action_map_add_action_entries( G_ACTION_MAP( self ),actions,2,self );
 }
 
