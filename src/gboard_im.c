@@ -31,6 +31,9 @@ typedef struct {
 	GtkWidget* launcher;
 	GDBusActionGroup* boardactions;
 	gboolean actions_ready;
+
+// TODO : Part of FIXME TODO for updating GDBusActionGroup correctly
+	guint update_actions_watcher;
 }	GbdIM;
 
 GtkIMContextInfo* clist[ ]= {
@@ -86,6 +89,10 @@ static void instance_finalize( GbdIM* self ) {
 	g_object_unref( self->board );
 	g_object_unref( self->boardactions );
 
+// TODO : Part of FIXME TODO for updating GDBusActionGroup correctly
+	if( self->update_actions_watcher )
+		g_bus_unwatch_name( self->update_actions_watcher );
+
 	G_OBJECT_CLASS( g_type_class_peek( GTK_TYPE_IM_CONTEXT ) )->dispose( G_OBJECT( self ) );
 }
 
@@ -114,7 +121,7 @@ static void focus_in( GtkIMContext* _self ) {
 		} else
 			g_printerr( "GBoard IM: GBoard could not be contacted (yet)\n" );
 	} else
-		g_printerr( "GBoard IM: Proxy to GBoard could not be generated\n" );
+		g_printerr( "GBoard IM: Proxy to GBoard not available (yet)\n" );
 }
 
 static void focus_out( GtkIMContext* _self ) {
@@ -152,9 +159,22 @@ static void launch_gboard( GtkButton* button,GbdIM* self ) {
 
 }
 
+// TODO : Part of FIXME TODO for updating GDBusActionGroup correctly
+static void update_actions( GDBusConnection* conn,const gchar *name,const gchar *unique,gpointer _self ) {
+	GbdIM* self = GBD_IM( _self );
+	g_print( "GBoard appeared on the Bus - updating actions\n" );
+	g_object_unref( self->boardactions );
+	self->boardactions = g_dbus_action_group_get( conn,GBD_NAME,GBD_PATH );
+	g_signal_connect( self->boardactions,"action-added",(GCallback)boardactions_verify,self );
+	boardactions_verify( G_ACTION_GROUP( self->boardactions ),NULL,self );
+	g_strfreev( g_action_group_list_actions( G_ACTION_GROUP( self->boardactions ) ) );
+}
+
 static void proxy_aquired( GObject* src,GAsyncResult* res,GbdIM* self ) {
 	self->board = g_dbus_proxy_new_for_bus_finish( res,NULL );
-	self->boardactions = g_dbus_action_group_get( g_dbus_proxy_get_connection( self->board ),GBD_NAME,GBD_PATH );
+
+	GDBusConnection* conn = g_dbus_proxy_get_connection( self->board );
+	self->boardactions = g_dbus_action_group_get( conn,GBD_NAME,GBD_PATH );
 
 	g_signal_connect( self->boardactions,"action-added",(GCallback)boardactions_verify,self );
 
@@ -173,6 +193,11 @@ static void proxy_aquired( GObject* src,GAsyncResult* res,GbdIM* self ) {
  * subsequently will cause the proper update).
  */
 	g_strfreev( g_action_group_list_actions( G_ACTION_GROUP( self->boardactions ) ) );
+/* FIXME TODO : Same here. It should not be the user's code's
+ * responsibility to look out for changed on the bus relevant for the
+ * GDBusActionGroup.
+ */
+	self->update_actions_watcher = g_bus_watch_name_on_connection( conn,GBD_NAME,G_BUS_NAME_WATCHER_FLAGS_NONE,update_actions,NULL,self,NULL );
 }
 
 static void boardactions_verify( GActionGroup* grp,gchar* act,GbdIM* self ) {
