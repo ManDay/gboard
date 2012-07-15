@@ -5,7 +5,7 @@
 
 /// Return GType; Return Class
 #define GBD_TYPE_APP (gbd_app_get_type( ))
-#define GBD_APP_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS( (obj),GBD_TYPE_APP,GbdAppClass ))
+// #define GBD_APP_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS( (obj),GBD_TYPE_APP,GbdAppClass ))
 
 /// Check whether instance is derived; Cast it
 #define GBD_IS_APP(obj) (G_TYPE_CHECK_INSTANCE_TYPE( (obj),GBD_TYPE_APP ))
