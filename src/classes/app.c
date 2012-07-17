@@ -5,6 +5,7 @@
 #include "../config.h"
 #include "../interfaces/emitter.h"
 #include "x11emitter.h"
+#include "layout.h"
 
 typedef enum {
 	GBD_STATUS_VISIBLE = 1,
@@ -17,6 +18,7 @@ struct GbdAppPrivate {
 	GbdStatus status;
 	GtkWidget* window;
 	GbdEmitter* emitter;
+	GData* layouts;
 };
 
 GDBusSignalInfo* sinfo[ ] = {
@@ -98,6 +100,7 @@ static void startup( GApplication* _self ) {
 	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd2,self );
 
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
+	g_datalist_init( &priv->layouts );
 //	priv->keyboard = gbd_keyboard_new( priv->emitter );
 }
 
@@ -107,8 +110,57 @@ static void activate( GApplication* _self ) {
 	g_print( "GBoard activated\n" );
 }
 
-static gint command_line( GApplication* self,GApplicationCommandLine* cl ) {
+static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
+	GbdAppPrivate* const priv = GBD_APP( _self )->priv;
 	g_print( "Parsing Commandline\n" );
+	
+	gint argc;
+	gchar** argv = g_application_command_line_get_arguments( cl,&argc );
+
+	GOptionContext* oc = g_option_context_new( "" );
+
+	gchar** layouts;
+	gboolean force;
+
+	GOptionEntry options[ ]= {
+		{ "layout",'l',0,G_OPTION_ARG_FILENAME_ARRAY,&layouts,"Layout to use. Multiple layouts are preloaded, the last is activated","layout" },
+		{ "force",'f',0,G_OPTION_ARG_NONE,&force,"Force reload of layout. Do not use cached layout","" },
+		NULL
+	};
+
+	g_option_context_add_main_entries( oc,options,NULL );
+	if( g_option_context_parse( oc,&argc,&argv,NULL ) ) {
+
+		guint i = 0;
+		while( layouts[ i ] ) {
+
+			GFile* file = g_file_new_for_commandline_arg( layouts[ i ] );
+			gchar* fileuri = g_file_get_uri( file );
+
+			g_print( "(Pre)Loading layout '%s' (=>%s)\n",layouts[ i++ ],fileuri );
+
+			if( force || !g_datalist_get_data( &priv->layouts,fileuri ) ) {
+				gchar* layoutstring;
+				GError* err = NULL;
+				if( g_file_load_contents( file,NULL,&layoutstring,NULL,NULL,&err ) ) {
+					GbdLayout* layout = gbd_layout_new( layoutstring );
+					g_datalist_set_data_full( &priv->layouts,fileuri,layout,g_object_unref );
+				} else {
+					g_printerr( "GBoard could not load layout definition file '%s': %s\n",layouts[ i++ ],err->message );
+					g_error_free( err );
+					err = NULL;
+				}
+			} else
+				g_print( "Skipping" );
+			g_free( fileuri );
+			g_object_unref( file );
+		}
+	}
+
+	g_strfreev( layouts );
+	g_option_context_free( oc );
+
+	return 0;
 }
 
 static gboolean dbus_register( GApplication* _self,GDBusConnection* conn,const gchar* dbapi,GError** error ) {

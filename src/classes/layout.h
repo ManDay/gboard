@@ -3,6 +3,8 @@
 
 #include <glib-object.h>
 
+#define GBD_LAYOUT_ERROR (gbd_layout_error_quark( ))
+
 /// Return GType; Return Class
 #define GBD_TYPE_LAYOUT (gbd_layout_get_type( ))
 
@@ -13,6 +15,11 @@
 /// Check whether class is derived; Cast it
 #define GBD_IS_LAYOUT_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE( (klass),GBD_TYPE_LAYOUT ))
 #define GBD_LAYOUT_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST( (klass),GBD_TYPE_LAYOUT,GbdLayoutClass ))
+
+typedef enum {
+	GBD_LAYOUT_ERROR_CODEPAGE, ///< Invalid UTF-8
+	GBD_LAYOUT_ERROR_STRAY ///< Stray token in file
+} GbdLayoutError;
 
 typedef struct GbdLayoutPrivate GbdLayoutPrivate;
 
@@ -26,9 +33,11 @@ typedef struct {
 	GObjectClass parent;
 } GbdLayoutClass;
 
-gboolean gbd_layout_parse( GbdLayout*,gchar* );
+gboolean gbd_layout_parse( GbdLayout*,gchar*,GError** );
 
 GType gbd_layout_get_type( void );
 GbdLayout* gbd_layout_new( gchar* );
+
+GQuark gbd_layout_error_quark( void ); 
 
 #endif
