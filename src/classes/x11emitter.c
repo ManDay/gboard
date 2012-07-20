@@ -38,6 +38,7 @@ static void instance_finalize( GbdX11emitter* self ) {
 }
 
 static guint get_code( GbdEmitter* self,gchar* key ) {
+	g_print( "Getting Code for '%s'\n",key );
 	return 0;
 }
 

@@ -140,7 +140,7 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 			if( force || !g_datalist_get_data( &priv->layouts,fileuri ) ) {
 				gchar* layoutstring;
 				if( g_file_load_contents( file,NULL,&layoutstring,NULL,NULL,&err ) ) {
-					GbdLayout* layout = gbd_layout_new( layoutstring );
+					GbdLayout* layout = gbd_layout_new( layoutstring,priv->emitter );
 					g_datalist_set_data_full( &priv->layouts,fileuri,layout,g_object_unref );
 					g_free( layoutstring );
 				} else {

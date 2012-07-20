@@ -3,6 +3,8 @@
 
 #include <glib-object.h>
 
+#include "../interfaces/emitter.h"
+
 #define GBD_LAYOUT_ERROR (gbd_layout_error_quark( ))
 
 /// Return GType; Return Class
@@ -36,7 +38,7 @@ typedef struct {
 gboolean gbd_layout_parse( GbdLayout*,gchar*,GError** );
 
 GType gbd_layout_get_type( void );
-GbdLayout* gbd_layout_new( gchar* );
+GbdLayout* gbd_layout_new( gchar*,GbdEmitter* );
 
 GQuark gbd_layout_error_quark( void ); 
 
