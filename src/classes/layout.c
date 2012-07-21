@@ -8,12 +8,14 @@
 #define REGEX_CM "\\{(?:" REGEX_C " )?(?'M'\\w+)\\}"
 #define REGEX_L "(?'L'.*?(?=\\}))"
 #define REGEX_I "\\((?'I'[^}]+)\\)"
-
 #define REGEX_ALL "^" REGEX_F "?s*\\{\\s*(?:" REGEX_E "|" REGEX_C "|" REGEX_CM ")\\s*(?:" REGEX_I "|" REGEX_L ")?\\}$"
 
 enum {
 	PROP_0,
 	PROP_EMITTER,
+	PROP_GROUPS,
+	PROP_WIDTH,
+	PROP_HEIGHT,
 	PROP_N
 };
 
@@ -24,32 +26,6 @@ struct GbdLayoutPrivate {
 	guint* map;
 };
 
-typedef struct {
-	guint id;
-	gboolean sticky;
-} KeyModifier;
-
-typedef union {
-	struct {
-		guint code;
-		KeyModifier modifier;
-	} action;
-	gchar* exec;
-} KeyAction;
-
-typedef struct {
-	KeyModifier modifier;
-	gboolean is_image;
-	gchar* label;
-	gboolean is_exec;
-	KeyAction action;
-}	Key;
-
-typedef struct {
-	Key* keys;
-	guint keycount,col,row,colspan,rowspan;
-} KeyGroup;
-
 static GParamSpec* props[ PROP_N ];
 
 static void class_init( GbdLayoutClass*,gpointer );
@@ -59,7 +35,7 @@ static void instance_finalize( GbdLayout* );
 static void set_property( GObject*,guint,const GValue*,GParamSpec* );
 static void get_property( GObject*,guint,GValue*,GParamSpec* );
 
-static void delete_keygroup( KeyGroup* );
+static void delete_keygroup( GbdKeyGroup* );
 
 static void class_init( GbdLayoutClass* klass,gpointer udata ) {
 	GObjectClass* klass_go = G_OBJECT_CLASS( klass );
@@ -71,6 +47,9 @@ static void class_init( GbdLayoutClass* klass,gpointer udata ) {
 	klass_go->set_property = set_property;
 
 	props[ PROP_EMITTER ]= g_param_spec_object( "emitter","Emitter","Emitter Object",G_TYPE_OBJECT,G_PARAM_READWRITE|G_PARAM_CONSTRUCT_ONLY );
+	props[ PROP_GROUPS ]= g_param_spec_boxed( "groups","Keygroups","Pointer Array to Keygroups, owned by GbdLayout",G_TYPE_PTR_ARRAY,G_PARAM_READABLE );
+	props[ PROP_WIDTH ]= g_param_spec_uint( "width","Keyboard Width","Width of keyboard in semi cells",0,G_MAXUINT,1,G_PARAM_READABLE );
+	props[ PROP_HEIGHT ]= g_param_spec_uint( "height","Keyboard Height","Height of keyboard in semi cells",0,G_MAXUINT,1,G_PARAM_READABLE );
 
 	g_object_class_install_properties( klass_go,PROP_N,props );
 }
@@ -80,6 +59,12 @@ static void instance_init( GbdLayout* self ) {
 }
 
 static void instance_finalize( GbdLayout* self ) {
+	GbdLayoutPrivate* const priv = self->priv;
+
+	if( priv->groups ) {
+		g_ptr_array_unref( priv->groups );
+		g_free( priv->map );
+	}
 	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->finalize( G_OBJECT( self ) );
 }
 
@@ -89,16 +74,29 @@ static void set_property( GObject* _self,guint param,const GValue* val,GParamSpe
 	priv->emitter = GBD_EMITTER( g_value_get_object( val ) );
 }
 
-static void get_property( GObject* _self,guint param,GValue* val,GParamSpec* pspec ) {
+static void get_property( GObject* _self,guint prop,GValue* val,GParamSpec* pspec ) {
 	GbdLayoutPrivate* const priv = GBD_LAYOUT( _self )->priv;
 
-	g_value_set_object( val,priv->emitter );
+	switch( prop ) {
+	case( PROP_EMITTER ):
+		g_value_set_object( val,priv->emitter );
+		break;
+	case( PROP_GROUPS ):
+		g_value_set_boxed( val,priv->groups );
+		break;
+	case( PROP_WIDTH ):
+		g_value_set_uint( val,priv->width );
+		break;
+	case( PROP_HEIGHT ):
+		g_value_set_uint( val,priv->height );
+		break;
+	}
 }
 
-static void delete_keygroup( KeyGroup* grp ) {
+static void delete_keygroup( GbdKeyGroup* grp ) {
 	guint i;
 	for( i = 0; i<grp->keycount; i++ ) {
-		Key key = grp->keys[ i ];
+		GbdKey key = grp->keys[ i ];
 		if( key.label )
 			g_free( key.label );
 		if( key.is_exec && key.action.exec )
@@ -108,7 +106,7 @@ static void delete_keygroup( KeyGroup* grp ) {
 	g_free( grp );
 }
 
-static guint fit_keygroup( KeyGroup* grp,GArray* vstack,guint x,guint y ) {
+static guint fit_keygroup( GbdKeyGroup* grp,GArray* vstack,guint x,guint y ) {
 	gboolean obtruded;
 	do {
 		guint i;
@@ -124,9 +122,9 @@ static guint fit_keygroup( KeyGroup* grp,GArray* vstack,guint x,guint y ) {
 	return x;
 }
 
-static KeyModifier spawn_modifier( GPtrArray* modlist,gchar* str ) {
+static GbdKeyModifier spawn_modifier( GPtrArray* modlist,gchar* str ) {
 	guint i;
-	KeyModifier result = { .sticky = g_ascii_isupper( str[ 0 ] ) };
+	GbdKeyModifier result = { .sticky = g_ascii_isupper( str[ 0 ] ) };
 	if( str[ 0 ]=='\0' ) {
 		result.id = 0;
 		return result;
@@ -142,7 +140,7 @@ static KeyModifier spawn_modifier( GPtrArray* modlist,gchar* str ) {
 	return result;
 }
 
-static Key* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError** err ) {
+static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError** err ) {
 	static GRegex* matcher = NULL;
 
 	if( !matcher )
@@ -162,7 +160,7 @@ static Key* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError*
 		return NULL;
 	}
 
-	Key* result = g_malloc( sizeof( Key ) );
+	GbdKey* result = g_malloc( sizeof( GbdKey ) );
 	result->is_image = FALSE;
 	result->label = NULL;
 	result->action.action.code = 0;
@@ -194,13 +192,13 @@ static Key* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError*
 	return result;
 }
 
-static KeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError** err ) {
+static GbdKeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError** err ) {
 	gint depth = 0;
 	gchar* current_char = str,
 		* current_key = str;
 	gboolean esc = FALSE;
 	
-	KeyGroup* grp = g_malloc( sizeof( KeyGroup ) );
+	GbdKeyGroup* grp = g_malloc( sizeof( GbdKeyGroup ) );
 	grp->keys = NULL;
 	grp->keycount = 0;
 	grp->rowspan = 1;
@@ -222,14 +220,14 @@ static KeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitt
 				if( depth<3 &&( depth>1 || current_key==str )&& current_key ) {
 					if( current_char-current_key>1 ) {
 						gchar* keystr = g_strndup( current_key,current_char-current_key+1 );
-						Key* key = parse_key( keystr,modlist,emitter,err );
+						GbdKey* key = parse_key( keystr,modlist,emitter,err );
 						if( err ) {
 							delete_keygroup( grp );
 							return NULL;
 						}
 						if( key ) {
-							grp->keys = g_realloc_n( grp->keys,++grp->keycount,sizeof( Key ) );
-							memcpy( grp->keys+grp->keycount-1,key,sizeof( Key ) );
+							grp->keys = g_realloc_n( grp->keys,++grp->keycount,sizeof( GbdKey ) );
+							memcpy( grp->keys+grp->keycount-1,key,sizeof( GbdKey ) );
 							g_free( key );
 						}
 						g_free( keystr );
@@ -311,7 +309,7 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 			} else {
 				if( depth==0 && finished_group ) {
 					gchar* groupstr = g_strndup( current_block,current_char-current_block );
-					KeyGroup* grp = parse_keygroup( groupstr,modifier_list,priv->emitter,err );
+					GbdKeyGroup* grp = parse_keygroup( groupstr,modifier_list,priv->emitter,err );
 					if( grp ) {
 						guint i;
 /* Keygroup successfully parsed. Position it. If it fits in, position it
@@ -329,7 +327,7 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 						for( i = x; i<x+grp->colspan; i++ )
 							g_array_index( vstack,guint,i )= y+grp->rowspan-1;
 
-//						g_print( "GRP '%s' {\n\tKeys:\t%i\n\tRowspan:\t%i\n\tColspan:\t%i\n}\n",groupstr,grp->keycount,grp->rowspan,grp->colspan );
+//						g_print( "GRP '%s' {\n\tKeys:\t%i\n\tRow-Pos:\t%i+%i\n\tCol-Pos:\t%i+%i\n}\n",groupstr,grp->keycount,grp->row,grp->rowspan,grp->col,grp->colspan );
 
 /* Not strictly necessary. Fitting the keygroup will increment X
  * accordingly, anyway, just saves a few iterations. */
@@ -371,7 +369,7 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 	guint* keymap = g_malloc0_n( height*width,sizeof( guint ) );
 	guint i;
 	for( i = 0; i<keygroup_list->len; i++ ) {
-		KeyGroup* grp = g_ptr_array_index( keygroup_list,i );
+		GbdKeyGroup* grp = g_ptr_array_index( keygroup_list,i );
 		guint y;
 		for( y = grp->row; y<grp->row+grp->rowspan; y++ ) {
 			guint x;

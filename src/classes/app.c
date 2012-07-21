@@ -5,6 +5,7 @@
 #include "../config.h"
 #include "../interfaces/emitter.h"
 #include "x11emitter.h"
+#include "keyboard.h"
 #include "layout.h"
 
 typedef enum {
@@ -18,6 +19,7 @@ struct GbdAppPrivate {
 	GbdStatus status;
 	GtkWidget* window;
 	GbdEmitter* emitter;
+	GbdKeyboard* keyboard;
 	GData* layouts;
 };
 
@@ -46,6 +48,7 @@ static void dbus_unregister( GApplication*,GDBusConnection*,const gchar* );
 static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GError*,gpointer );
 static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
 
+static void update_regions( GbdKeyboard*,GbdApp* );
 static void toggle_board_hnd( GtkStatusIcon*,GbdApp* );
 static void show_board_hnd( GSimpleAction*,GVariant*,gpointer );
 static void hide_board_hnd( GSimpleAction*,GVariant*,gpointer );
@@ -97,11 +100,18 @@ static void startup( GApplication* _self ) {
 
 	priv->window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
 	gtk_window_set_title( GTK_WINDOW( priv->window ),"GBoard" );
+	gtk_window_set_accept_focus( GTK_WINDOW( priv->window ),FALSE );
+	gtk_window_set_keep_above( GTK_WINDOW( priv->window ),TRUE );
 	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd2,self );
 
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
 	g_datalist_init( &priv->layouts );
-//	priv->keyboard = gbd_keyboard_new( priv->emitter );
+	priv->keyboard = gbd_keyboard_new( NULL );
+
+	gtk_container_add( GTK_CONTAINER( priv->window ),GTK_WIDGET( priv->keyboard ) );
+	gtk_widget_show( GTK_WIDGET( priv->keyboard ) );
+
+	g_signal_connect( priv->keyboard,"mask-change",(GCallback)update_regions,_self );
 }
 
 static void activate( GApplication* _self ) {
@@ -133,6 +143,7 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 	if( g_option_context_parse( oc,&argc,&argv,&err ) ) {
 
 		guint i = 0;
+		GbdLayout* lastvalid = NULL;
 		while( layouts && layouts[ i ] ) {
 			GFile* file = g_file_new_for_commandline_arg( layouts[ i ] );
 			gchar* fileuri = g_file_get_uri( file );
@@ -143,6 +154,7 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 					GbdLayout* layout = gbd_layout_new( layoutstring,priv->emitter );
 					g_datalist_set_data_full( &priv->layouts,fileuri,layout,g_object_unref );
 					g_free( layoutstring );
+					lastvalid = layout;
 				} else {
 					g_printerr( "GBoard could not load layout definition file '%s': %s\n",layouts[ i ],err->message );
 					g_error_free( err );
@@ -153,6 +165,8 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 			g_object_unref( file );
 			i++;
 		}
+		if( lastvalid )
+			g_object_set( priv->keyboard,"layout",lastvalid,NULL );
 		g_strfreev( layouts );
 	} else {
 		g_printerr( "GBoard could not parse commandline: %s\n",err->message );
@@ -214,6 +228,26 @@ static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
 		hide_board( self );
 	else
 		show_board( self );
+}
+
+/** FIXME TODO
+ * Usually, GbdApp should be able to just set the window shape to the
+ * children's (i.e. GbdKeyboard's) ones by means of
+ * gdk_window_set_child_shapes. However, said function seems to invert
+ * the mask which GbdKeyboard sets on itsself. Meaning that if
+ * GbdKeyboard sets a mask to show all keys and hide the space between,
+ * the Toplevel will decide to hide all keys and show the gaps, instead.
+ * That's presumably a bug. However, by only setting the mask in the
+ * Toplevel, we also forgo the unnecessary overhead of setting a mask
+ * twice, which is a good thing.
+ */
+static void update_regions( GbdKeyboard* keyboard,GbdApp* self ) {
+	cairo_region_t* regions = gbd_keyboard_regions( keyboard );
+	GdkWindow* win;
+	if( regions &&( win = gtk_widget_get_window( GTK_WIDGET( self->priv->window ) ) ) ) {
+		gdk_window_shape_combine_region( win,regions,0,0 );
+		cairo_region_destroy( regions );
+	}
 }
 
 static void show_board_hnd( GSimpleAction* action,GVariant* parms,gpointer _self ) {

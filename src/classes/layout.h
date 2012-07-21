@@ -35,6 +35,32 @@ typedef struct {
 	GObjectClass parent;
 } GbdLayoutClass;
 
+typedef struct {
+	guint id;
+	gboolean sticky;
+} GbdKeyModifier;
+
+typedef union {
+	struct {
+		guint code;
+		GbdKeyModifier modifier;
+	} action;
+	gchar* exec;
+} GbdKeyAction;
+
+typedef struct {
+	GbdKeyModifier modifier;
+	gboolean is_image;
+	gchar* label;
+	gboolean is_exec;
+	GbdKeyAction action;
+}	GbdKey;
+
+typedef struct {
+	GbdKey* keys;
+	guint keycount,col,row,colspan,rowspan;
+} GbdKeyGroup;
+
 gboolean gbd_layout_parse( GbdLayout*,gchar*,GError** );
 
 GType gbd_layout_get_type( void );
