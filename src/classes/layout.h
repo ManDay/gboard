@@ -19,8 +19,8 @@
 #define GBD_LAYOUT_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST( (klass),GBD_TYPE_LAYOUT,GbdLayoutClass ))
 
 typedef enum {
-	GBD_LAYOUT_ERROR_CODEPAGE, ///< Invalid UTF-8
-	GBD_LAYOUT_ERROR_STRAY ///< Stray token in file
+	GBD_LAYOUT_ERROR_CODEPAGE,
+	GBD_LAYOUT_ERROR_KEY
 } GbdLayoutError;
 
 typedef struct GbdLayoutPrivate GbdLayoutPrivate;

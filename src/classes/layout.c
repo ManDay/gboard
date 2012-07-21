@@ -2,6 +2,15 @@
 
 #include <string.h>
 
+#define REGEX_F "(?'F'\\w+)"
+#define REGEX_E "\\((?'E'[^)]+)\\)"
+#define REGEX_C "(?'C'\\w+)"
+#define REGEX_CM "\\{(?:" REGEX_C " )?(?'M'\\w+)\\}"
+#define REGEX_L "(?'L'.*?(?=\\}))"
+#define REGEX_I "\\((?'I'[^}]+)\\)"
+
+#define REGEX_ALL "^" REGEX_F "?s*\\{\\s*(?:" REGEX_E "|" REGEX_C "|" REGEX_CM ")\\s*(?:" REGEX_I "|" REGEX_L ")?\\}$"
+
 enum {
 	PROP_0,
 	PROP_EMITTER,
@@ -10,6 +19,9 @@ enum {
 
 struct GbdLayoutPrivate {
 	GbdEmitter* emitter;
+	guint width,height;
+	GPtrArray* groups;
+	guint* map;
 };
 
 typedef struct {
@@ -104,9 +116,9 @@ static guint fit_keygroup( KeyGroup* grp,GArray* vstack,guint x,guint y ) {
 		for( i = x; i<x+grp->colspan; i++ )
 			if( vstack->len>i && g_array_index( vstack,guint,i )>=y ) {
 				obtruded = TRUE;
+				x = i+1;
 				break;
 			}
-		x++;
 	} while( obtruded );
 
 	return x;
@@ -131,99 +143,59 @@ static KeyModifier spawn_modifier( GPtrArray* modlist,gchar* str ) {
 }
 
 static Key* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError** err ) {
-/*
- * key ::= modname "{" keydata "}" | "{" keydata "}"
- * keydata ::= action | action " " label
- * action ::= codename | "{" codename " " modname "}" |
- * 	"{" modname "}" | "(" exec ")"
- * label ::= labeltext | "(" imageuri ")"
- */
-	g_print( "KEY '%s' {\n",str );
+	static GRegex* matcher = NULL;
+
+	if( !matcher )
+		matcher = g_regex_new( REGEX_ALL,G_REGEX_DUPNAMES|G_REGEX_OPTIMIZE,0,NULL );
+	GMatchInfo* minfo = NULL;
+	g_regex_match( matcher,str,0,&minfo );
+
+	gchar* filter = g_match_info_fetch_named( minfo,"F" );
+	gchar* exec = g_match_info_fetch_named( minfo,"E" );
+	gchar* code = g_match_info_fetch_named( minfo,"C" );
+	gchar* mod = g_match_info_fetch_named( minfo,"M" );
+	gchar* label = g_match_info_fetch_named( minfo,"L" );
+	gchar* image = g_match_info_fetch_named( minfo,"I" );
+
+	if( !filter ) {
+		g_set_error( err,GBD_LAYOUT_ERROR,GBD_LAYOUT_ERROR_KEY,"Could not parse key definition '%s'",str );
+		return NULL;
+	}
 
 	Key* result = g_malloc( sizeof( Key ) );
-	result->modifier.id = 0;
-	result->modifier.sticky = FALSE;
 	result->is_image = FALSE;
 	result->label = NULL;
-	result->is_exec = FALSE;
 	result->action.action.code = 0;
 	result->action.action.modifier.id = 0;
 
-	gchar* current_char = str;
-	guint depth = 0;
-	gboolean esc = FALSE;
-	gboolean actiondone = FALSE;
+	result->modifier = spawn_modifier( modlist,filter );
+	g_free( filter );
 
-	while( current_char[ 0 ] ) {
-		if( !esc ) {
-			gchar c = current_char[ 0 ];
-			if( !actiondone &&( c==' ' || c=='}' && depth==1 && current_char-str>0 ) ) {
-				gchar* codestr = g_strndup( str,current_char-str );
-				result->action.action.code = gbd_emitter_get_code( emitter,codestr );
-				g_free( codestr );
-				if( depth==1 )
-					actiondone = TRUE;
-			}
-			switch( c ) {
-			case '{':
-				if( depth==0 ) {
-					gchar* modstr = g_strndup( str,current_char-str );
-					result->modifier = spawn_modifier( modlist,modstr );
-					g_free( modstr );
-				}
-				str = current_char+1;
-				depth++;
-				break;
-			case '}':
-				if( depth==2 ) {
-					gchar* modstr = g_strndup( str,current_char-str );
-					result->action.action.modifier = spawn_modifier( modlist,modstr );
-					result->is_exec = FALSE;
-					g_free( modstr );
-					actiondone = TRUE;
-				} else if( depth==1 ) {
-					if( !result->label )
-						result->label = g_strndup( str,current_char-str );
-				}
-				depth--;
-				break;
-			case ')':
-				if( actiondone && !result->label ) {
-					result->label = g_strndup( str,current_char-str );
-					result->is_image = TRUE;
-				} else if( !actiondone && !result->action.exec ) {
-					result->action.exec = g_strndup( str,current_char-str );
-					result->is_exec = TRUE;
-				}
-			case ' ':
-			case '(':
-				str = current_char+1;
-				break;
-			case '\\':
-				esc = TRUE;
-			}
-		} else
-			esc = FALSE;
-
-		current_char = g_utf8_next_char( current_char );
+	result->is_exec = exec[ 0 ]!='\0';
+	if( result->is_exec )
+		result->action.exec = exec;
+	else {
+		result->action.action.code = gbd_emitter_get_code( emitter,code );
+		result->action.action.modifier = spawn_modifier( modlist,mod );
+		g_free( exec );
 	}
+	g_free( code );
+	g_free( mod );
 
-	g_print( "%i%c:\"%s\"{%i[%i%c]%s}\n",
-		result->modifier.id,
-		result->modifier.sticky?'S':'s',
-		result->label,
-		result->is_exec?-1:result->action.action.code,
-		result->is_exec?-1:result->action.action.modifier.id,
-		result->is_exec?' ':result->action.action.modifier.sticky?'S':'s',
-		result->is_exec?result->action.exec:""
-	);
+	result->is_image = image[ 0 ]!='\0';
+	if( result->is_image ) {
+		result->label = image;
+		g_free( label );
+	} else {
+		result->label = label;
+		g_free( image );
+	}
 
 	return result;
 }
 
 static KeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GError** err ) {
-	g_print( "GRP '%s' {\n",str );
-	guint depth = 0;
+	gint depth = 0;
 	gchar* current_char = str,
 		* current_key = str;
 	gboolean esc = FALSE;
@@ -231,22 +203,23 @@ static KeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitt
 	KeyGroup* grp = g_malloc( sizeof( KeyGroup ) );
 	grp->keys = NULL;
 	grp->keycount = 0;
-	grp->colspan = 1;
 	grp->rowspan = 1;
 
 	while( current_char[ 0 ] ) {
 		gchar c = current_char[ 0 ];
 
-		if( depth==1 && c!=' ' && !current_key || !esc && c=='{' && current_key==str ) {
+		if( depth==1 && c!=' ' && !current_key || !esc && c=='{' && current_key==str )
 			current_key = current_char;
-		}
 
 		if( !esc ) {
-			if( depth==1 && c=='_' )
-					grp->rowspan += grp->keys?2:1;
+			if( depth==1 )
+				if( c=='_' )
+					grp->rowspan++;
+				else if( c!='}' )
+					grp->rowspan = 1;
 
 			if( c=='}' ) {
-				if( depth<3 && current_key ) {
+				if( depth<3 &&( depth>1 || current_key==str )&& current_key ) {
 					if( current_char-current_key>1 ) {
 						gchar* keystr = g_strndup( current_key,current_char-current_key+1 );
 						Key* key = parse_key( keystr,modlist,emitter,err );
@@ -262,8 +235,7 @@ static KeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitt
 						g_free( keystr );
 					}
 					current_key = NULL;
-				} else if( depth==0 )
-					grp->colspan += grp->keys?2:1;
+				}
 				depth--;
 			} else if( c=='{' ) {
 				if( depth==1 )
@@ -277,12 +249,15 @@ static KeyGroup* parse_keygroup( gchar* str,GPtrArray* modlist,GbdEmitter* emitt
 		current_char = g_utf8_next_char( current_char );
 	}
 
-	if( grp->keys ) {
+	if( depth<0 )
+		grp->colspan = 1-depth;
+	else
+		grp->colspan = 1;
+
+	if( grp->keys>0 ) {
 		grp->colspan++;
 		grp->rowspan++;
 	}
-	
-	g_print( "}\n" );
 
 	return grp;
 }
@@ -318,9 +293,8 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 		finished_group = FALSE;
 
 	guint depth = 0,
-		x = 0,
-		y = 0,
-		x_max = 0;
+		width = 0,x = 0,
+		height = 0,y = 0;
 
 	while( current_char[ 0 ] ) {
 		gchar c = current_char[ 0 ];
@@ -336,27 +310,41 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 				}
 			} else {
 				if( depth==0 && finished_group ) {
-					gchar* keygroup = g_strndup( current_block,current_char-current_block );
-					KeyGroup* grp = parse_keygroup( keygroup,modifier_list,priv->emitter,err );
-					g_free( keygroup );
+					gchar* groupstr = g_strndup( current_block,current_char-current_block );
+					KeyGroup* grp = parse_keygroup( groupstr,modifier_list,priv->emitter,err );
 					if( grp ) {
-						g_ptr_array_add( keygroup_list,grp );
-	/* Keygroup successfully parsed. Position it. If it fits in, position it
-	 * at the current (x,y) position, increasing x by the colspan of the group
-	 * and updating the vstack in the range [x,x+colspan-1] to become
-	 * y+rowspan-1. If it doesn't fit in, considering the vstack, find the
-	 * next x for which vspan in the range of [x,x+colspan-1] is less than
-	 * y, and position it there - updating the vstack equally.
-	 */
-						x = fit_keygroup( grp,vstack,x,y );
-						if( vstack->len<=x+grp->colspan )
-							g_array_set_size( vstack,x+grp->colspan+1 );
 						guint i;
+/* Keygroup successfully parsed. Position it. If it fits in, position it
+ * at the current (x,y) position, increasing x by the colspan of the group
+ * and updating the vstack in the range [x,x+colspan-1] to become
+ * y+rowspan-1. If it doesn't fit in, considering the vstack, find the
+ * next x for which vspan in the range of [x,x+colspan-1] is less than
+ * y, and position it there - updating the vstack equally.
+ */
+						grp->col = fit_keygroup( grp,vstack,x,y );
+						grp->row = y;
+
+						if( vstack->len<x+grp->colspan )
+							g_array_set_size( vstack,x+grp->colspan );
 						for( i = x; i<x+grp->colspan; i++ )
 							g_array_index( vstack,guint,i )= y+grp->rowspan-1;
 
+//						g_print( "GRP '%s' {\n\tKeys:\t%i\n\tRowspan:\t%i\n\tColspan:\t%i\n}\n",groupstr,grp->keycount,grp->rowspan,grp->colspan );
+
+/* Not strictly necessary. Fitting the keygroup will increment X
+ * accordingly, anyway, just saves a few iterations. */
 						x += grp->colspan;
+
+						if( grp->col+grp->colspan>width )
+							width = grp->col+grp->colspan;
+						if( grp->row+grp->rowspan>height )
+							height = grp->row+grp->rowspan;
+						if( grp->keycount>0 )
+							g_ptr_array_add( keygroup_list,grp );
+						else
+							delete_keygroup( grp );
 					}
+					g_free( groupstr );
 				}
 				if( c=='\\' )
 					esc = TRUE;
@@ -367,6 +355,7 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 				} else if( c=='\n' ) {
 					depth = 0;
 					y++;
+					x = 0;
 				}
 				finished_group = FALSE;
 			}
@@ -377,8 +366,30 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 	}
 
 	g_ptr_array_unref( modifier_list );
-	g_ptr_array_unref( keygroup_list );
 	g_array_unref( vstack );
+	
+	guint* keymap = g_malloc0_n( height*width,sizeof( guint ) );
+	guint i;
+	for( i = 0; i<keygroup_list->len; i++ ) {
+		KeyGroup* grp = g_ptr_array_index( keygroup_list,i );
+		guint y;
+		for( y = grp->row; y<grp->row+grp->rowspan; y++ ) {
+			guint x;
+			for( x = grp->col; x<grp->col+grp->colspan; x++ )
+				keymap[ x+( width )*y ]= i+1;
+		}
+	}
+
+	if( priv->groups ) {
+		g_ptr_array_unref( priv->groups );
+		g_free( priv->map );
+	}
+	priv->groups = keygroup_list;
+	priv->map = keymap;
+	priv->width = width;
+	priv->height = height;
+
+	return TRUE;
 }
 
 GType gbd_layout_get_type( ) {
