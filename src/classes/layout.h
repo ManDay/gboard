@@ -62,6 +62,7 @@ typedef struct {
 } GbdKeyGroup;
 
 gboolean gbd_layout_parse( GbdLayout*,gchar*,GError** );
+GbdKey* gbd_layout_at( GbdLayout*,gint,gint,guint );
 
 GType gbd_layout_get_type( void );
 GbdLayout* gbd_layout_new( gchar*,GbdEmitter* );

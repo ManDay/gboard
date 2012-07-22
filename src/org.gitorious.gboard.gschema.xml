@@ -1,0 +1,47 @@
+<schemalist><schema id="${GBD_NAME}" path="${GBD_PATH_TERMED}">
+	<key name="keywidth" type="q">
+		<range min="1" />
+		<default>80</default>
+	</key>
+	<key name="keyheight" type="q">
+		<range min="1" />
+		<default>60</default>
+	</key>
+	<key name="maxheight" type="d">
+		<range min="0" max="1" />
+		<default>0.4</default>
+	</key>
+	<key name="xpadding" type="d">
+		<range min="0" max="1" />
+		<default>0.4</default>
+	</key>
+	<key name="ypadding" type="d">
+		<range min="0" max="1" />
+		<default>0.4</default>
+	</key>
+	<key name="remember" type="b">
+		<default>false</default>
+	</key>
+	<key name="north" type="b">
+		<default>false</default>
+	</key>
+	<key name="docked" type="b">
+		<default>true</default>
+	</key>
+	<key name="statusicon" type="s">
+		<default>"${CMAKE_INSTALL_PREFIX}/share/gboard/statusicon.svg"</default>
+	</key>
+	<key name="layout" type="s">
+		<default>"${CMAKE_INSTALL_PREFIX}/share/gboard/layouts/de-latin1-short.gboard"</default>
+	</key>
+	<key name="fontsize" type="d">
+		<range min="0" />
+		<default>0.5</default>
+	</key>
+	<key name="relative" type="b">
+		<default>true</default>
+	</key>
+	<key name="shaped" type="b">
+		<default>true</default>
+	</key>
+</schema></schemalist>

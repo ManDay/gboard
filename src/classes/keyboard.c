@@ -22,7 +22,14 @@ struct GbdKeyboardPrivate {
 	GbdLayout* layout;
 	gdouble xpadding,ypadding;
 	GPtrArray* cached_groups;
+	guint mod;
 	guint cached_width,cached_height;
+};
+
+struct DrawInfo {
+	GbdKeyboard* self;
+	GtkStyleContext* style;
+	cairo_t* cr;
 };
 
 typedef void(* KeyOperation)( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,gpointer );
@@ -38,10 +45,12 @@ static void get_property( GObject*,guint,GValue*,GParamSpec* );
 
 static gboolean configure_event( GtkWidget*,GdkEventConfigure* );
 static gboolean draw( GtkWidget*,cairo_t* );
+static gboolean button_press_event( GtkWidget*,GdkEventButton* );
+static gboolean button_release_event( GtkWidget*,GdkEventButton* );
 
 static void mask_change( GbdKeyboard*,gpointer );
 static void accumulate_regions( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,cairo_region_t* );
-static void draw_key( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,cairo_t* );
+static void draw_key( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,struct DrawInfo* );
 static gboolean foreach_key( GbdKeyboard*,KeyOperation,gpointer );
 
 static void class_init( GbdKeyboardClass* klass,gpointer udata ) {
@@ -56,6 +65,8 @@ static void class_init( GbdKeyboardClass* klass,gpointer udata ) {
 
 	klass_gw->draw = draw;
 	klass_gw->configure_event = configure_event;
+	klass_gw->button_release_event = button_release_event;
+	klass_gw->button_press_event = button_press_event;
 
 	klass->mask_change = mask_change;
 
@@ -86,7 +97,7 @@ static void set_property( GObject* _self,guint prop,const GValue* value,GParamSp
 			g_object_unref( priv->layout );
 			g_ptr_array_unref( priv->cached_groups );
 		}
-		priv->layout = g_value_get_object( value );
+		priv->layout = g_value_dup_object( value );
 		if( priv->layout )
 			g_object_get( priv->layout,"groups",&priv->cached_groups,"width",&priv->cached_width,"height",&priv->cached_height,NULL );
 		else
@@ -128,15 +139,63 @@ static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
 	if( !priv->cached_groups )
 		return TRUE;
 
-	cairo_set_source_rgb( cr,1,0,0 );
-	foreach_key( GBD_KEYBOARD( _self ),(KeyOperation)draw_key,cr );
+	struct DrawInfo info = { GBD_KEYBOARD( _self ),gtk_widget_get_style_context( _self ),cr };
+
+	foreach_key( GBD_KEYBOARD( _self ),(KeyOperation)draw_key,&info );
 	cairo_fill( cr );
 
 	return TRUE;
 }
 
-static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* key,cairo_t* cr ) {
-	cairo_rectangle( cr,x,y,w,h );
+static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
+	GbdKeyboardPrivate* const priv = GBD_KEYBOARD( _self )->priv;
+	gint x = priv->cached_width*ev->x/gtk_widget_get_allocated_width( _self );
+	gint y = priv->cached_height*ev->y/gtk_widget_get_allocated_height( _self );
+	GbdKey* key = gbd_layout_at( priv->layout,x,y,priv->mod );
+	if( key ) {
+		g_print( "Pressed key '%s'\n",key->label );
+		guint mod;
+		if( !key->is_exec &&( mod = key->action.action.modifier.id ) ) {
+			g_print( "Has modifier %i\n",mod );
+		} else
+			mod = 0;
+		priv->mod = mod;
+		gtk_widget_queue_draw( _self );
+	}
+}
+static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
+}
+
+static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygrp,struct DrawInfo* info ) {
+	GbdKeyboardPrivate* const priv = info->self->priv;
+	gtk_style_context_add_class( info->style,GTK_STYLE_CLASS_DEFAULT );
+
+	x = ceil( x );
+	y = ceil( y );
+	w = floor( w )-1;
+	h = floor( h )-1;
+
+	gtk_render_background( info->style,info->cr,x,y,w,h );
+	gtk_render_frame( info->style,info->cr,x,y,w,h );
+	gtk_render_focus( info->style,info->cr,x,y,w,h );
+
+	guint i;
+	GbdKey key = keygrp->keys[ 0 ];
+	for( i = 0; i<keygrp->keycount; i++ ) {
+		if( keygrp->keys[ i ].modifier.id==priv->mod ) {
+			key = keygrp->keys[ i ];
+			break;
+		}
+	}
+
+	cairo_text_extents_t extents;
+	cairo_text_extents( info->cr,key.label,&extents );
+
+	const gdouble right = x+w/2-extents.width/2-extents.x_bearing;
+	const gdouble down = y+h/2-extents.height/2-extents.y_bearing;
+
+	cairo_move_to( info->cr,right,down );
+	cairo_show_text( info->cr,key.label );
 }
 
 static void mask_change( GbdKeyboard* self,gpointer udata ) {

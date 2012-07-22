@@ -8,7 +8,7 @@
 #define REGEX_CM "\\{(?:" REGEX_C " )?(?'M'\\w+)\\}"
 #define REGEX_L "(?'L'.*?(?=\\}))"
 #define REGEX_I "\\((?'I'[^}]+)\\)"
-#define REGEX_ALL "^" REGEX_F "?s*\\{\\s*(?:" REGEX_E "|" REGEX_C "|" REGEX_CM ")\\s*(?:" REGEX_I "|" REGEX_L ")?\\}$"
+#define REGEX_ALL "^" REGEX_F "?s*\\{\\s*(?:" REGEX_E "|" REGEX_C "|" REGEX_CM ")\\s?(?:" REGEX_I "|" REGEX_L ")?\\}$"
 
 enum {
 	PROP_0,
@@ -169,6 +169,20 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 	result->modifier = spawn_modifier( modlist,filter );
 	g_free( filter );
 
+	result->is_image = image[ 0 ]!='\0';
+	if( result->is_image ) {
+		result->label = image;
+		g_free( label );
+	} else {
+		if( label[ 0 ]!='\0' )
+			result->label = label;
+		else {
+			result->label = g_strdup( code );
+			g_free( label );
+		}
+		g_free( image );
+	}
+
 	result->is_exec = exec[ 0 ]!='\0';
 	if( result->is_exec )
 		result->action.exec = exec;
@@ -179,15 +193,6 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 	}
 	g_free( code );
 	g_free( mod );
-
-	result->is_image = image[ 0 ]!='\0';
-	if( result->is_image ) {
-		result->label = image;
-		g_free( label );
-	} else {
-		result->label = label;
-		g_free( image );
-	}
 
 	return result;
 }
@@ -388,6 +393,21 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 	priv->height = height;
 
 	return TRUE;
+}
+
+GbdKey* gbd_layout_at( GbdLayout* self,gint x,gint y,guint mod ) {
+	GbdLayoutPrivate* const priv = self->priv;
+	guint keyno;
+	if( x<priv->width && y<priv->height &&( keyno = priv->map[ priv->width*y+x ] ) ) {
+		GbdKeyGroup* grp = g_ptr_array_index( priv->groups,keyno-1 );
+		guint i;
+		GbdKey* result = &grp->keys[ 0 ];
+		for( i = 0; i<grp->keycount; i++ )
+			if( grp->keys[ i ].modifier.id==mod )
+				return &grp->keys[ i ];
+		return result;
+	} else
+		return NULL;
 }
 
 GType gbd_layout_get_type( ) {

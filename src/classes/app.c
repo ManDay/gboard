@@ -1,26 +1,20 @@
 #include "app.h"
 
 #include <stdlib.h>
-
-#include "../config.h"
+#include <gbd_config.h>
 #include "../interfaces/emitter.h"
 #include "x11emitter.h"
 #include "keyboard.h"
 #include "layout.h"
 
-typedef enum {
-	GBD_STATUS_VISIBLE = 1,
-	GBD_STATUS_KEY = 1 << 1,
-	GBD_STATUS_PEN = 1 << 2
-} GbdStatus;
-
 struct GbdAppPrivate {
 	GtkStatusIcon* tray;
-	GbdStatus status;
-	GtkWidget* window;
+	GtkWindow* window;
 	GbdEmitter* emitter;
 	GbdKeyboard* keyboard;
 	GData* layouts;
+	gboolean visible,pen,docked,north;
+	GSettings* settings;
 };
 
 GDBusSignalInfo* sinfo[ ] = {
@@ -48,6 +42,7 @@ static void dbus_unregister( GApplication*,GDBusConnection*,const gchar* );
 static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GError*,gpointer );
 static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
 
+static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
 static void update_regions( GbdKeyboard*,GbdApp* );
 static void toggle_board_hnd( GtkStatusIcon*,GbdApp* );
 static void show_board_hnd( GSimpleAction*,GVariant*,gpointer );
@@ -72,9 +67,9 @@ static void class_init( GbdAppClass* klass,gpointer udata ) {
 }
 
 static void instance_init( GbdApp* self ) {
-	self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_APP,GbdAppPrivate );
+	GbdAppPrivate* const priv = self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_APP,GbdAppPrivate );
 
-	self->priv->status = GBD_STATUS_KEY;
+	priv->settings = g_settings_new( GBD_NAME );
 
 	GActionEntry actions[ ]= {
 		{ "Show",show_board_hnd,"y" },
@@ -84,12 +79,13 @@ static void instance_init( GbdApp* self ) {
 }
 
 static void instance_finalize( GbdApp* self ) {
+	GbdAppPrivate* const priv = self->priv;
+	g_object_unref( priv->settings );
+
 	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->finalize( G_OBJECT( self ) );
 }
 
 static void startup( GApplication* _self ) {
-	g_print( "Startup of GBoard\n" );
-
 	G_APPLICATION_CLASS( g_type_class_peek( GTK_TYPE_APPLICATION ) )->startup( _self );
 	GbdApp* const self = GBD_APP( _self );
 	GbdAppPrivate* const priv = self->priv;
@@ -98,15 +94,19 @@ static void startup( GApplication* _self ) {
 	priv->tray = gtk_status_icon_new_from_stock( GTK_STOCK_EDIT );
 	g_signal_connect( priv->tray,"activate",(GCallback)toggle_board_hnd,self );
 
-	priv->window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
-	gtk_window_set_title( GTK_WINDOW( priv->window ),"GBoard" );
-	gtk_window_set_accept_focus( GTK_WINDOW( priv->window ),FALSE );
-	gtk_window_set_keep_above( GTK_WINDOW( priv->window ),TRUE );
+	priv->window = GTK_WINDOW( gtk_window_new( GTK_WINDOW_TOPLEVEL ) );
+	gtk_window_set_title( priv->window,"GBoard" );
+	gtk_window_set_accept_focus( priv->window,FALSE );
+	gtk_window_set_keep_above( priv->window,TRUE );
+	gtk_window_stick( priv->window );
+	gtk_window_set_skip_taskbar_hint( priv->window,TRUE );
+	gtk_window_set_decorated( priv->window,FALSE );
 	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd2,self );
 
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
 	g_datalist_init( &priv->layouts );
 	priv->keyboard = gbd_keyboard_new( NULL );
+	gtk_widget_set_events( GTK_WIDGET( priv->keyboard ),GDK_BUTTON_PRESS_MASK|GDK_EXPOSURE_MASK );
 
 	gtk_container_add( GTK_CONTAINER( priv->window ),GTK_WIDGET( priv->keyboard ) );
 	gtk_widget_show( GTK_WIDGET( priv->keyboard ) );
@@ -117,12 +117,12 @@ static void startup( GApplication* _self ) {
 static void activate( GApplication* _self ) {
 	G_APPLICATION_CLASS( g_type_class_peek( GTK_TYPE_APPLICATION ) )->activate( _self );
 
+	// TODO - Do we need activation anywhere?
 	g_print( "GBoard activated\n" );
 }
 
 static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 	GbdAppPrivate* const priv = GBD_APP( _self )->priv;
-	g_print( "Parsing Commandline\n" );
 	
 	gint argc;
 	gchar** argv = g_application_command_line_get_arguments( cl,&argc );
@@ -146,30 +146,17 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 		GbdLayout* lastvalid = NULL;
 		while( layouts && layouts[ i ] ) {
 			GFile* file = g_file_new_for_commandline_arg( layouts[ i ] );
-			gchar* fileuri = g_file_get_uri( file );
-
-			if( force || !g_datalist_get_data( &priv->layouts,fileuri ) ) {
-				gchar* layoutstring;
-				if( g_file_load_contents( file,NULL,&layoutstring,NULL,NULL,&err ) ) {
-					GbdLayout* layout = gbd_layout_new( layoutstring,priv->emitter );
-					g_datalist_set_data_full( &priv->layouts,fileuri,layout,g_object_unref );
-					g_free( layoutstring );
-					lastvalid = layout;
-				} else {
-					g_printerr( "GBoard could not load layout definition file '%s': %s\n",layouts[ i ],err->message );
-					g_error_free( err );
-					err = NULL;
-				}
+			if( !load_layout( GBD_APP( _self ),file,force,&err ) ) {
+				g_critical( "GBoard could not parse layoutfile '%s': %s",layouts[ i ],err->message );
+				g_error_free( err );
+				err = NULL;
 			}
-			g_free( fileuri );
 			g_object_unref( file );
 			i++;
 		}
-		if( lastvalid )
-			g_object_set( priv->keyboard,"layout",lastvalid,NULL );
 		g_strfreev( layouts );
 	} else {
-		g_printerr( "GBoard could not parse commandline: %s\n",err->message );
+		g_error( "GBoard could not parse commandline: %s",err->message );
 		g_error_free( err );
 		err = NULL;
 	}
@@ -198,7 +185,7 @@ static GVariant* dbus_property_get( GDBusConnection* conn,gchar* send,gchar* pat
 	GbdAppPrivate* const priv = GBD_APP( _self )->priv;
 
 	if( !g_strcmp0( prop,"Visible" ) )
-		return g_variant_new( "y",priv->status&GBD_STATUS_VISIBLE?priv->status==GBD_STATUS_KEY?1:2:0 );
+		return g_variant_new( "y",priv->visible?priv->pen?2:1:0 );
 
 	return NULL;
 }
@@ -207,30 +194,62 @@ static gboolean* dbus_property_set( GDBusConnection* conn,gchar* send,gchar* pat
 	// Nothing to see here, move along
 }
 
+static gboolean load_layout( GbdApp* self,GFile* file,gboolean force,GError** err ) {
+	GbdAppPrivate* const priv = self->priv;
+
+	gchar* fileuri = g_file_get_uri( file );
+	GbdLayout* layout;
+
+	if( force || !(layout = g_datalist_get_data( &priv->layouts,fileuri ) ) ) {
+		gchar* layoutstring;
+		if( g_file_load_contents( file,NULL,&layoutstring,NULL,NULL,err ) ) {
+			layout = gbd_layout_new( layoutstring,priv->emitter );
+			g_datalist_set_data_full( &priv->layouts,fileuri,layout,g_object_unref );
+			g_free( layoutstring );
+		} else
+			return FALSE;
+	} else
+		g_message( "Using cached version of '%s'",fileuri );
+
+	g_free( fileuri );
+
+	guint width,height;
+	g_object_get( layout,"width",&width,"height",&height,NULL );
+
+	gdouble aspect = width/(gdouble)height;
+
+	GdkGeometry geom = { .min_aspect = aspect,.max_aspect = aspect };
+	gtk_window_set_geometry_hints( priv->window,NULL,&geom,GDK_HINT_ASPECT );
+
+	g_object_set( priv->keyboard,"layout",layout,NULL );
+
+	return TRUE;
+}
+
 static void show_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-	priv->status |= GBD_STATUS_VISIBLE;
+	priv->visible = TRUE;
 
-	gtk_widget_show( priv->window );
+	gtk_widget_show( GTK_WIDGET( priv->window ) );
 }
 
 static void hide_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-	priv->status &= ~GBD_STATUS_VISIBLE;
+	priv->visible = FALSE;
 
-	gtk_widget_hide( priv->window );
+	gtk_widget_hide( GTK_WIDGET( priv->window ) );
 }
 
 static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 	
-	if( priv->status&GBD_STATUS_VISIBLE )
+	if( priv->visible )
 		hide_board( self );
 	else
 		show_board( self );
 }
 
-/** FIXME TODO
+/** TODO
  * Usually, GbdApp should be able to just set the window shape to the
  * children's (i.e. GbdKeyboard's) ones by means of
  * gdk_window_set_child_shapes. However, said function seems to invert
