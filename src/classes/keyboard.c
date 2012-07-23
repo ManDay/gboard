@@ -144,7 +144,8 @@ static gboolean configure_event( GtkWidget* _self,GdkEventConfigure* ev ) {
 }
 
 static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
-	GbdKeyboardPrivate* const priv = GBD_KEYBOARD( _self )->priv;
+	GbdKeyboard* const self = GBD_KEYBOARD( _self );
+	GbdKeyboardPrivate* const priv = self->priv;
 
 	if( !priv->cached_groups )
 		return TRUE;
@@ -152,7 +153,26 @@ static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
 	struct DrawInfo info = { GBD_KEYBOARD( _self ),gtk_widget_get_style_context( _self ),cr };
 
 	foreach_key( GBD_KEYBOARD( _self ),(KeyOperation)draw_key,&info );
-	cairo_fill( cr );
+
+	guint i;
+	const gint width = gtk_widget_get_allocated_width( _self  );
+	const gint height = gtk_widget_get_allocated_height( _self );
+	const gdouble cellwidth = width/(gdouble)priv->cached_width;
+	const gdouble cellheight = height/(gdouble)priv->cached_height;
+	for( i = 0; i<priv->pressed->len; i++ ) {
+		const GbdKeyGroup* grp = get_pressed_key( self,i );
+		if( grp ) {
+			const GbdKey* key = current_key( self,grp );
+			if( !gbd_key_is_mod( key ) ) {
+				const gdouble x = ceil( grp->col*cellwidth+priv->xpadding*cellwidth );
+				const gdouble y = ceil( grp->row*cellheight+priv->ypadding*cellheight );
+				const gdouble w = floor( cellwidth*( grp->colspan-2*priv->xpadding ) )-1;
+				const gdouble h = floor( cellheight*( grp->rowspan-2*priv->ypadding ) )-1;
+
+				gtk_render_focus( gtk_widget_get_style_context( _self ),cr,x,y,w,h );
+			}
+		}
+	}		
 
 	return TRUE;
 }
@@ -305,8 +325,10 @@ static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygr
 	gtk_render_background( info->style,info->cr,x,y,w,h );
 	gtk_render_frame( info->style,info->cr,x,y,w,h );
 
-	guint i;
 	const GbdKey* key = current_key( info->self,keygrp );
+	if( gbd_key_is_mod( key )&& key->action.action.modifier.id==priv->mod.id &&
+		( key->action.action.modifier.sticky==priv->mod.sticky || priv->invertmod ) )
+		gtk_render_focus( info->style,info->cr,x,y,w,h );
 
 	cairo_text_extents_t extents;
 	cairo_text_extents( info->cr,key->label,&extents );
