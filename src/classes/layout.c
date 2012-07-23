@@ -442,11 +442,14 @@ const GbdKey* gbd_key_current( const GbdKeyGroup* grp,const GbdKeyModifier oldmo
  *   within Caps-Lock). */
 	guint i;
 	const GbdKey* result = &grp->keys[ 0 ];
+	const GbdKey* newresult = NULL;
 	const GbdKeyModifier mod = inverted?oldmod:newmod;
 	for( i = 0; i<grp->keycount; i++ ) {
 		const GbdKey* const key = &grp->keys[ i ];
 		if( key->filter.id==mod.id &&( !mod.sticky || key->filter.sticky ) )
 			result = key;
+		if( inverted && key->filter.id==newmod.id && !key->filter.sticky ) 
+			newresult = key;
 		if( newmod.id && gbd_key_is_mod( key ) ) {
 			const GbdKeyModifier keymod = key->action.action.modifier;
 			if( inverted ) {
@@ -461,7 +464,10 @@ const GbdKey* gbd_key_current( const GbdKeyGroup* grp,const GbdKeyModifier oldmo
 				return key;
 		}
 	}
-	return result;
+	if( newresult )
+		return newresult;
+	else
+		return result;
 }
 
 GType gbd_layout_get_type( ) {

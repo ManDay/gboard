@@ -208,17 +208,24 @@ static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
 		if( gbd_key_is_mod( key ) ) {
 			release_all_keys( self );
 			if( priv->mod.id==key->action.action.modifier.id ) {
-				if( priv->mod.sticky==key->action.action.modifier.sticky && !priv->invertmod )
+				// Very same modifier
+				if( priv->mod.sticky==key->action.action.modifier.sticky )
 					priv->planrelease = TRUE;
 				else {
-					if( priv->mod.sticky && !priv->invertmod )
-						priv->invertmod = TRUE;
+					// Same but non-sticky
+					if( priv->mod.sticky )
+						if( priv->invertmod )
+							priv->planrelease = TRUE;
+						else {
+							priv->planrelease = FALSE;
+							priv->invertmod = TRUE;
+						}
+					// Same but sticky
 					else {
 						priv->mod = key->action.action.modifier;
 						priv->planrelease = FALSE;
 						priv->invertmod = FALSE;
 					}
-					priv->planrelease = FALSE;
 				}
 			} else {
 				priv->oldmod = priv->mod;
