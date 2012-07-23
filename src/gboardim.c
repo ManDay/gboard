@@ -1,7 +1,7 @@
 #include <gtk/gtk.h>
 #include <gtk/gtkimmodule.h>
 
-#include "config.h"
+#include <gbd_config.h>
 
 /// Return GType; Return Class
 #define GBD_TYPE_IM (gbd_im_get_type( ))

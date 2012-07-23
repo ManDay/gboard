@@ -13,8 +13,9 @@ static void instance_init( GbdX11emitter* );
 static void instance_finalize( GbdX11emitter* );
 static void interface_init_emitter( GbdEmitterInterface*,gpointer* );
 
-static guint get_code( GbdEmitter*,gchar* );
-static void emit( GbdEmitter*,guint );
+static guint64 get_code( GbdEmitter*,gchar* );
+static void emit( GbdEmitter*,guint64 );
+static void release( GbdEmitter*,guint64 );
 
 static void class_init( GbdX11emitterClass* klass,gpointer udata ) {
 	GObjectClass* klass_go = G_OBJECT_CLASS( klass );
@@ -30,6 +31,7 @@ static void instance_init( GbdX11emitter* self ) {
 
 static void interface_init_emitter( GbdEmitterInterface* iface,gpointer* udata ) {
 	iface->emit = emit;
+	iface->release = release;
 	iface->get_code = get_code;
 }
 
@@ -37,11 +39,15 @@ static void instance_finalize( GbdX11emitter* self ) {
 	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->finalize( G_OBJECT( self ) );
 }
 
-static guint get_code( GbdEmitter* self,gchar* key ) {
+static guint64 get_code( GbdEmitter* self,gchar* key ) {
 	return 0;
 }
 
-static void emit( GbdEmitter* self,guint code ) {
+static void emit( GbdEmitter* self,guint64 code ) {
+	return;
+}
+
+static void release( GbdEmitter* self,guint64 code ) {
 	return;
 }
 

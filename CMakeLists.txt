@@ -3,10 +3,13 @@ cmake_minimum_required( VERSION 2.8 )
 project( GBoard C )
 
 set( GBD_BUILD_GTK_IM TRUE CACHE BOOL "Whether to build the GTK IM-Module" )
+set( GBD_INSTALL_LAYOUTS TRUE CACHE BOOL "Whether to install layouts" )
 set( GBD_NAME "org.gitorious.gboard" CACHE STRING "Unique dot separated name for GBoard" )
 set( GBD_PATH "/org/gitorious/gboard" CACHE STRING "Unique slash separated path for GBoard - must not end with a slash" )
 set( GBD_SCHEMAS_PATH "share/glib-2.0/schemas" CACHE PATH "Install path for schema definition" )
 set( GBD_GTK_IM_PATH "lib/gtk-3.0/3.0.0" CACHE PATH "Install path for IM Module and associated cache" )
+
+mark_as_advanced( GBD_NAME GBD_PATH )
 
 if( IS_ABSOLUTE "${GBD_SCHEMAS_PATH}" )
 	set( GBD_SCHEMAS_TARGET "${GBD_SCHEMAS_PATH}" )
@@ -36,7 +39,7 @@ add_executable( gboard src/main.c src/classes/app.c src/classes/x11emitter.c src
 target_link_libraries( gboard ${GTK_LDFLAGS} )
 
 if( GBD_BUILD_GTK_IM )
-	add_library( gboardim MODULE src/gboard_im.c )
+	add_library( gboardim MODULE src/gboardim.c )
 	target_link_libraries( gboardim ${GTK_LDFLAGS} )
 
 	set_property( TARGET gboardim PROPERTY PREFIX "im-" )
@@ -50,6 +53,10 @@ if( GBD_BUILD_GTK_IM )
 
 	install( TARGETS gboardim DESTINATION "${GBD_GTK_IM_TARGET}/immodules" )
 	install( CODE "set( ENV{GTK_IM_MODULE_FILE} \"${GBD_GTK_IM_TARGET}/immodules.cache\" )\nexecute_process( COMMAND gtk-query-immodules-3.0 --update-cache \"${GBD_GTK_IM_TARGET}/immodules/${GBD_IMLIBNAME}\" )" )
+endif( )
+
+if( GBD_INSTALL_LAYOUTS )
+	install( DIRECTORY layouts DESTINATION share/gboard )
 endif( )
 
 install( TARGETS gboard DESTINATION bin )

@@ -1,9 +1,9 @@
 <schemalist><schema id="${GBD_NAME}" path="${GBD_PATH_TERMED}">
-	<key name="keywidth" type="q">
+	<key name="keywidth" type="i">
 		<range min="1" />
 		<default>80</default>
 	</key>
-	<key name="keyheight" type="q">
+	<key name="keyheight" type="i">
 		<range min="1" />
 		<default>60</default>
 	</key>
@@ -13,11 +13,11 @@
 	</key>
 	<key name="xpadding" type="d">
 		<range min="0" max="1" />
-		<default>0.4</default>
+		<default>0.1</default>
 	</key>
 	<key name="ypadding" type="d">
 		<range min="0" max="1" />
-		<default>0.4</default>
+		<default>0.1</default>
 	</key>
 	<key name="remember" type="b">
 		<default>false</default>
@@ -40,6 +40,9 @@
 	</key>
 	<key name="relative" type="b">
 		<default>true</default>
+	</key>
+	<key name="multipointer" type="b">
+		<default>false</default>
 	</key>
 	<key name="shaped" type="b">
 		<default>true</default>

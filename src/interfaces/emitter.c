@@ -2,12 +2,16 @@
 
 #define GBD_EMITTER_GET_INTERFACE(obj) (G_TYPE_INSTANCE_GET_INTERFACE(obj,GBD_TYPE_EMITTER,GbdEmitterInterface))
 
-guint gbd_emitter_get_code( GbdEmitter* self,gchar* key ) {
+guint64 gbd_emitter_get_code( GbdEmitter* self,gchar* key ) {
 	GBD_EMITTER_GET_INTERFACE( self )->get_code( self,key );
 }
 
-void gbd_emitter_emit( GbdEmitter* self,guint code) {
+void gbd_emitter_emit( GbdEmitter* self,guint64 code) {
 	GBD_EMITTER_GET_INTERFACE( self )->emit( self,code );
+}
+
+void gbd_emitter_release( GbdEmitter* self,guint64 code) {
+	GBD_EMITTER_GET_INTERFACE( self )->release( self,code );
 }
 
 GType gbd_emitter_get_type( ) {

@@ -166,7 +166,7 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 	result->action.action.code = 0;
 	result->action.action.modifier.id = 0;
 
-	result->modifier = spawn_modifier( modlist,filter );
+	result->filter = spawn_modifier( modlist,filter );
 	g_free( filter );
 
 	result->is_image = image[ 0 ]!='\0';
@@ -395,19 +395,73 @@ gboolean gbd_layout_parse( GbdLayout* self,gchar* str,GError** err ) {
 	return TRUE;
 }
 
-GbdKey* gbd_layout_at( GbdLayout* self,gint x,gint y,guint mod ) {
+const GbdKeyGroup* gbd_layout_at( GbdLayout* self,gint x,gint y ) {
 	GbdLayoutPrivate* const priv = self->priv;
 	guint keyno;
-	if( x<priv->width && y<priv->height &&( keyno = priv->map[ priv->width*y+x ] ) ) {
-		GbdKeyGroup* grp = g_ptr_array_index( priv->groups,keyno-1 );
-		guint i;
-		GbdKey* result = &grp->keys[ 0 ];
-		for( i = 0; i<grp->keycount; i++ )
-			if( grp->keys[ i ].modifier.id==mod )
-				return &grp->keys[ i ];
-		return result;
-	} else
-		return NULL;
+	if( x<priv->width && y<priv->height &&( keyno = priv->map[ priv->width*y+x ] ) )
+		return g_ptr_array_index( priv->groups,keyno-1 );
+	return NULL;
+}
+
+gboolean gbd_key_is_mod( const GbdKey* key ) {
+	return !key->is_exec && key->action.action.modifier.id!=0;
+}
+
+const GbdKey* gbd_key_current( const GbdKeyGroup* grp,const GbdKeyModifier oldmod,const GbdKeyModifier newmod,gboolean inverted ){
+/* Which key is in effect, currently? Try to stay consistent and
+ * intuitive at the same time!
+ * WITHOUT ANY MODIFIER, the according keys which match a no-modifier
+ * filter or the first in the list, if all keys of the keygroup have
+ * filters.
+ * WITH A MODIFIER, WITHOUT INVERSION (i.e. Shift being pressed in Caps
+ * Lock), the last key in the list which matches the current modifier by
+ * filter, or, preferably, the first key in the list which matches the
+ * current old modifier by filter and carries the current modifier
+ * exactly (including stick-state).  This ensures that if a modifier is
+ * activated, it will not elevate itsself to become something else, but
+ * instead stay the modifier. A reasonable application of this
+ * (unreasonable straight-ahead usage such as directly stating that a
+ * key should become a different key by a filter, which it emits
+ * itsself) would be the Caps-Lock and Shift button: Caps-Lock should
+ * change Shift to display a different icon (in the sense of temporarily
+ * un-locking caps), which means Shift has a filter for sticky
+ * Shift-state. A filter for a sticky state always implies being
+ * filtered for the non-sticky state, aswell, meaning Shift would listen
+ * to its own, non-sticky state, too. To prevent it from assuming its
+ * "alternate ego" as it does with Caps-Lock, this mechanism holds it
+ * down in the state in which it was found at the time of the press (the
+ * old modifier).
+ * WITH A MODIFIER, WITH INVERSION, the last key in the list which
+ * matches the old modifier by filter, or, preferably, the first key in
+ * the list which either
+ * - matches the old modifier by filter and carries the new modifier as
+ *   sticky (compare Caps-Lock key)
+ * or
+ * - matches the new modifier in sticky-state by filter and carries the
+ *   new modifier as non-sticky (compare Shift key, activated from
+ *   within Caps-Lock). */
+	guint i;
+	const GbdKey* result = &grp->keys[ 0 ];
+	const GbdKeyModifier mod = inverted?oldmod:newmod;
+	for( i = 0; i<grp->keycount; i++ ) {
+		const GbdKey* const key = &grp->keys[ i ];
+		if( key->filter.id==mod.id &&( !mod.sticky || key->filter.sticky ) )
+			result = key;
+		if( newmod.id && gbd_key_is_mod( key ) ) {
+			const GbdKeyModifier keymod = key->action.action.modifier;
+			if( inverted ) {
+				if( ( key->filter.id==oldmod.id &&( oldmod.sticky || key->filter.sticky )
+					&& keymod.id==newmod.id && keymod.sticky )||
+					( key->filter.id==newmod.id && key->filter.sticky && keymod.id==newmod.id && !keymod.sticky ) )
+					return key;
+			} else if( keymod.id==newmod.id &&
+				keymod.sticky==newmod.sticky &&
+				key->filter.id==oldmod.id &&
+				( !oldmod.sticky || key->filter.sticky ) )
+				return key;
+		}
+	}
+	return result;
 }
 
 GType gbd_layout_get_type( ) {

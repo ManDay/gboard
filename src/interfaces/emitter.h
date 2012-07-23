@@ -15,12 +15,14 @@ typedef struct GbdEmitter GbdEmitter;
 typedef struct {
 	GTypeInterface parent;
 
-	guint(* get_code)( GbdEmitter*,gchar* );
-	void(* emit)( GbdEmitter*,guint );
+	guint64(* get_code)( GbdEmitter*,gchar* );
+	void(* emit)( GbdEmitter*,guint64 );
+	void(* release)( GbdEmitter*,guint64 );
 } GbdEmitterInterface;
 
-guint gbd_emitter_get_code( GbdEmitter*,gchar* );
-void gbd_emitter_emit( GbdEmitter*,guint );
+guint64 gbd_emitter_get_code( GbdEmitter*,gchar* );
+void gbd_emitter_emit( GbdEmitter*,guint64 );
+void gbd_emitter_release( GbdEmitter*,guint64 );
 
 GType gbd_emitter_get_type( void );
 

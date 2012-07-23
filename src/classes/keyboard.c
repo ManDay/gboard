@@ -21,9 +21,12 @@ enum {
 struct GbdKeyboardPrivate {
 	GbdLayout* layout;
 	gdouble xpadding,ypadding;
+	GbdKeyModifier mod,oldmod;
+	GPtrArray* pressed;
 	GPtrArray* cached_groups;
-	guint mod;
+	GbdEmitter* emitter;
 	guint cached_width,cached_height;
+	gboolean planrelease,invertmod;
 };
 
 struct DrawInfo {
@@ -48,10 +51,15 @@ static gboolean draw( GtkWidget*,cairo_t* );
 static gboolean button_press_event( GtkWidget*,GdkEventButton* );
 static gboolean button_release_event( GtkWidget*,GdkEventButton* );
 
+static const GbdKey* current_key( GbdKeyboard*,const GbdKeyGroup* );
+static GbdKeyGroup* get_pressed_key( GbdKeyboard*,guint );
+static void set_pressed_key( GbdKeyboard*,guint,const GbdKeyGroup* );
+static gboolean is_pressed_key( GbdKeyboard*,const GbdKeyGroup* );
 static void mask_change( GbdKeyboard*,gpointer );
 static void accumulate_regions( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,cairo_region_t* );
 static void draw_key( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,struct DrawInfo* );
 static gboolean foreach_key( GbdKeyboard*,KeyOperation,gpointer );
+static void release_all_keys( GbdKeyboard* );
 
 static void class_init( GbdKeyboardClass* klass,gpointer udata ) {
 	GObjectClass* klass_go = G_OBJECT_CLASS( klass );
@@ -81,6 +89,8 @@ static void class_init( GbdKeyboardClass* klass,gpointer udata ) {
 
 static void instance_init( GbdKeyboard* self ) {
 	self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_KEYBOARD,GbdKeyboardPrivate );
+
+	self->priv->pressed = g_ptr_array_new( );
 }
 
 static void instance_finalize( GbdKeyboard* self ) {
@@ -99,7 +109,7 @@ static void set_property( GObject* _self,guint prop,const GValue* value,GParamSp
 		}
 		priv->layout = g_value_dup_object( value );
 		if( priv->layout )
-			g_object_get( priv->layout,"groups",&priv->cached_groups,"width",&priv->cached_width,"height",&priv->cached_height,NULL );
+			g_object_get( priv->layout,"groups",&priv->cached_groups,"width",&priv->cached_width,"height",&priv->cached_height,"emitter",&priv->emitter,NULL );
 		else
 			priv->cached_groups = NULL;
 		break;
@@ -148,27 +158,144 @@ static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
 }
 
 static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
-	GbdKeyboardPrivate* const priv = GBD_KEYBOARD( _self )->priv;
+	GbdKeyboard* const self = GBD_KEYBOARD( _self );
+	GbdKeyboardPrivate* const priv = self->priv;
+/* TODO : Multi-Pointer and/or -Device support.
+ * Assign a number to each pointer/device, currently hardcoded to 0.
+ * Each pointer is given its own "Keypress"-Slot, so with n pointers,
+ * n keys may be pressed in parallel. */
+	guint pointer = 0;
+
+	if( ev->type==GDK_2BUTTON_PRESS )
+		return TRUE;
+
+	// TODO : Consistency check may be removed
+	const GbdKeyGroup* grp;
+	if( grp = get_pressed_key( self,pointer ) ) {
+		const GbdKey* key = current_key( self,grp );
+		if( !key->is_exec ) {
+			g_warning( "GBoard detected inconsistent pointer event - Forcefully releasing key %li",key->action.action.code );
+			gbd_emitter_release( priv->emitter,key->action.action.code );
+		}
+	}
+
 	gint x = priv->cached_width*ev->x/gtk_widget_get_allocated_width( _self );
 	gint y = priv->cached_height*ev->y/gtk_widget_get_allocated_height( _self );
-	GbdKey* key = gbd_layout_at( priv->layout,x,y,priv->mod );
-	if( key ) {
-		g_print( "Pressed key '%s'\n",key->label );
-		guint mod;
-		if( !key->is_exec &&( mod = key->action.action.modifier.id ) ) {
-			g_print( "Has modifier %i\n",mod );
-		} else
-			mod = 0;
-		priv->mod = mod;
+	grp = gbd_layout_at( priv->layout,x,y );
+
+	if( grp && !is_pressed_key( self,grp ) ) {
+		const GbdKey* key = current_key( self,grp );
+		if( gbd_key_is_mod( key ) ) {
+			release_all_keys( self );
+			if( priv->mod.id==key->action.action.modifier.id ) {
+				if( priv->mod.sticky==key->action.action.modifier.sticky && !priv->invertmod )
+					priv->planrelease = TRUE;
+				else {
+					if( priv->mod.sticky && !priv->invertmod )
+						priv->invertmod = TRUE;
+					else {
+						priv->mod = key->action.action.modifier;
+						priv->planrelease = FALSE;
+						priv->invertmod = FALSE;
+					}
+					priv->planrelease = FALSE;
+				}
+			} else {
+				priv->oldmod = priv->mod;
+				priv->mod = key->action.action.modifier;
+				priv->planrelease = FALSE;
+				priv->invertmod = FALSE;
+			}
+		}
+		if( !key->is_exec )
+			gbd_emitter_emit( priv->emitter,key->action.action.code );
+		set_pressed_key( self,pointer,grp );
 		gtk_widget_queue_draw( _self );
 	}
 }
+
+static const GbdKey* current_key( GbdKeyboard* self,const GbdKeyGroup* grp ) {
+	return gbd_key_current( grp,self->priv->oldmod,self->priv->mod,self->priv->invertmod );
+}
+
 static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
+	GbdKeyboard* const self = GBD_KEYBOARD( _self );
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint pointer = 0;
+
+	const GbdKeyGroup* grp;
+	if( grp = get_pressed_key( self,pointer ) ) {
+		const GbdKey* key = current_key( self,grp );
+		set_pressed_key( self,pointer,NULL );
+		if( gbd_key_is_mod( key ) ) {
+			if( priv->planrelease )
+				if( priv->invertmod )
+					priv->invertmod = FALSE;
+				else {
+					priv->oldmod = (GbdKeyModifier){ 0 };
+					priv->mod = (GbdKeyModifier){ 0 };
+				}
+		} else {
+			if( !is_pressed_key( self,NULL ) ) {
+				if( priv->invertmod )
+					priv->invertmod = !priv->invertmod;
+				else if( !priv->mod.sticky ) {
+					priv->oldmod = (GbdKeyModifier){ 0 };
+					priv->mod = (GbdKeyModifier){ 0 };
+					priv->planrelease = TRUE;
+				}
+			}
+		}
+		gtk_widget_queue_draw( _self );
+	} else
+		g_warning( "GBoard detected inconsistent pointer event - Cannot release key for pointer %i",pointer );
+}
+
+static GbdKeyGroup* get_pressed_key( GbdKeyboard* self,guint pointer ) {
+	if( self->priv->pressed->len>pointer )
+		return g_ptr_array_index( self->priv->pressed,pointer );
+	else
+		return NULL;
+}
+
+static gboolean is_pressed_key( GbdKeyboard* self,const GbdKeyGroup* grp ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	for( i = 0; i<priv->pressed->len; i++ )
+		if( grp!=NULL && grp==g_ptr_array_index( priv->pressed,i )|| grp==NULL && g_ptr_array_index( priv->pressed,i )!=NULL )
+			return TRUE;
+	return FALSE;
+}
+
+static void set_pressed_key( GbdKeyboard* self,guint pointer,const GbdKeyGroup* grp ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	if( priv->pressed->len<=pointer )
+		g_ptr_array_set_size( priv->pressed,pointer+1 );
+
+/* Not very beautiful, but priv->pressed is practically const to us and
+ * just couldn't be declared as such - the cast serves to silence the
+ * compiler. */
+	( (const GbdKeyGroup**)priv->pressed->pdata )[ pointer ]= grp;
+}
+
+static void release_all_keys( GbdKeyboard* self ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	for( i = 0; i<priv->pressed->len; i++ ) {
+		const GbdKeyGroup* grp;
+		const GbdKey* key;
+		guint64 code;
+		if( ( grp = g_ptr_array_index( priv->pressed,i ) )&&( key = current_key( self,grp ) ) )
+			if( !key->is_exec &&( code = key->action.action.code ) ) {
+				gbd_emitter_release( priv->emitter,code );
+				g_ptr_array_index( priv->pressed,i )= NULL;
+			}
+	}
 }
 
 static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygrp,struct DrawInfo* info ) {
 	GbdKeyboardPrivate* const priv = info->self->priv;
-	gtk_style_context_add_class( info->style,GTK_STYLE_CLASS_DEFAULT );
+	gtk_style_context_add_class( info->style,GTK_STYLE_CLASS_BUTTON );
 
 	x = ceil( x );
 	y = ceil( y );
@@ -177,25 +304,18 @@ static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygr
 
 	gtk_render_background( info->style,info->cr,x,y,w,h );
 	gtk_render_frame( info->style,info->cr,x,y,w,h );
-	gtk_render_focus( info->style,info->cr,x,y,w,h );
 
 	guint i;
-	GbdKey key = keygrp->keys[ 0 ];
-	for( i = 0; i<keygrp->keycount; i++ ) {
-		if( keygrp->keys[ i ].modifier.id==priv->mod ) {
-			key = keygrp->keys[ i ];
-			break;
-		}
-	}
+	const GbdKey* key = current_key( info->self,keygrp );
 
 	cairo_text_extents_t extents;
-	cairo_text_extents( info->cr,key.label,&extents );
+	cairo_text_extents( info->cr,key->label,&extents );
 
 	const gdouble right = x+w/2-extents.width/2-extents.x_bearing;
 	const gdouble down = y+h/2-extents.height/2-extents.y_bearing;
 
 	cairo_move_to( info->cr,right,down );
-	cairo_show_text( info->cr,key.label );
+	cairo_show_text( info->cr,key->label );
 }
 
 static void mask_change( GbdKeyboard* self,gpointer udata ) {

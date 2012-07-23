@@ -10,6 +10,7 @@
 struct GbdAppPrivate {
 	GtkStatusIcon* tray;
 	GtkWindow* window;
+	GtkWindow* prefwindow;
 	GbdEmitter* emitter;
 	GbdKeyboard* keyboard;
 	GData* layouts;
@@ -43,6 +44,9 @@ static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*
 static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
 
 static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
+static void activate_layout( GbdApp*,GbdLayout* );
+static void show_prefs( GbdApp* );
+static void show_prefs_hnd( GSimpleAction*,GVariant*,gpointer );
 static void update_regions( GbdKeyboard*,GbdApp* );
 static void toggle_board_hnd( GtkStatusIcon*,GbdApp* );
 static void show_board_hnd( GSimpleAction*,GVariant*,gpointer );
@@ -73,9 +77,10 @@ static void instance_init( GbdApp* self ) {
 
 	GActionEntry actions[ ]= {
 		{ "Show",show_board_hnd,"y" },
-		{ "Hide",hide_board_hnd,"b" }
+		{ "Hide",hide_board_hnd,"b" },
+		{ "Preferences",show_prefs_hnd }
 	};
-	g_action_map_add_action_entries( G_ACTION_MAP( self ),actions,2,self );
+	g_action_map_add_action_entries( G_ACTION_MAP( self ),actions,3,self );
 }
 
 static void instance_finalize( GbdApp* self ) {
@@ -106,10 +111,13 @@ static void startup( GApplication* _self ) {
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
 	g_datalist_init( &priv->layouts );
 	priv->keyboard = gbd_keyboard_new( NULL );
-	gtk_widget_set_events( GTK_WIDGET( priv->keyboard ),GDK_BUTTON_PRESS_MASK|GDK_EXPOSURE_MASK );
+	gtk_widget_set_events( GTK_WIDGET( priv->keyboard ),GDK_BUTTON_PRESS_MASK|GDK_BUTTON_RELEASE_MASK|GDK_EXPOSURE_MASK );
 
 	gtk_container_add( GTK_CONTAINER( priv->window ),GTK_WIDGET( priv->keyboard ) );
 	gtk_widget_show( GTK_WIDGET( priv->keyboard ) );
+
+	g_settings_bind( priv->settings,"xpadding",priv->keyboard,"xpadding",G_SETTINGS_BIND_DEFAULT );
+	g_settings_bind( priv->settings,"ypadding",priv->keyboard,"ypadding",G_SETTINGS_BIND_DEFAULT );
 
 	g_signal_connect( priv->keyboard,"mask-change",(GCallback)update_regions,_self );
 }
@@ -130,11 +138,12 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 	GOptionContext* oc = g_option_context_new( "" );
 
 	gchar** layouts = NULL;
-	gboolean force = FALSE;
+	gboolean force = FALSE,prefs = FALSE;
 
 	GOptionEntry options[ ]= {
 		{ "layout",'l',0,G_OPTION_ARG_FILENAME_ARRAY,&layouts,"Layout to use. Multiple layouts are preloaded, the last is activated","layout" },
 		{ "force",'f',0,G_OPTION_ARG_NONE,&force,"Force reload of layout. Do not use cached layout",NULL },
+		{ "preferences",'p',0,G_OPTION_ARG_NONE,&prefs,"Display Preferences",NULL },
 		NULL
 	};
 
@@ -155,6 +164,9 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 			i++;
 		}
 		g_strfreev( layouts );
+
+		if( prefs )
+			show_prefs( GBD_APP( _self ) );
 	} else {
 		g_error( "GBoard could not parse commandline: %s",err->message );
 		g_error_free( err );
@@ -213,17 +225,30 @@ static gboolean load_layout( GbdApp* self,GFile* file,gboolean force,GError** er
 
 	g_free( fileuri );
 
-	guint width,height;
-	g_object_get( layout,"width",&width,"height",&height,NULL );
-
-	gdouble aspect = width/(gdouble)height;
-
-	GdkGeometry geom = { .min_aspect = aspect,.max_aspect = aspect };
-	gtk_window_set_geometry_hints( priv->window,NULL,&geom,GDK_HINT_ASPECT );
-
-	g_object_set( priv->keyboard,"layout",layout,NULL );
+	activate_layout( self,layout );
 
 	return TRUE;
+}
+
+static void activate_layout( GbdApp* self,GbdLayout* layout ) {
+	GbdAppPrivate* const priv = self->priv;
+	guint width,height;
+
+	g_object_get( layout,"width",&width,"height",&height,NULL );
+	const guint keywidth = g_settings_get_int( priv->settings,"keywidth" );
+	const guint keyheight = g_settings_get_int( priv->settings,"keyheight" );
+	const gdouble maxheight = g_settings_get_double( priv->settings,"maxheight" )*gdk_screen_height( );
+
+	gdouble scale = 1;
+
+	if( height*keyheight>maxheight )
+		scale = maxheight/( height*keyheight );
+
+	if( width*keywidth*scale>gdk_screen_width( ) )
+		scale = gdk_screen_width( )/(gdouble)( width*keywidth );
+
+	gtk_window_resize( priv->window,width*keywidth*scale,height*keyheight*scale );
+	g_object_set( priv->keyboard,"layout",layout,NULL );
 }
 
 static void show_board( GbdApp* self ) {
@@ -238,6 +263,12 @@ static void hide_board( GbdApp* self ) {
 	priv->visible = FALSE;
 
 	gtk_widget_hide( GTK_WIDGET( priv->window ) );
+}
+
+static void show_prefs( GbdApp* self ) {
+	GbdAppPrivate* const priv = self->priv;
+
+	gtk_widget_show( GTK_WIDGET( priv->prefwindow ) );
 }
 
 static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
@@ -275,6 +306,10 @@ static void show_board_hnd( GSimpleAction* action,GVariant* parms,gpointer _self
 
 static void hide_board_hnd( GSimpleAction* action,GVariant* parms,gpointer _self ) {
 	hide_board( GBD_APP( _self ) );
+}
+
+static void show_prefs_hnd( GSimpleAction* action,GVariant* parms,gpointer _self ) {
+	show_prefs( GBD_APP( _self ) );
 }
 
 static gboolean hide_board_hnd2( GtkWidget* widget,GdkEvent* ev,GbdApp* self ) {

@@ -42,14 +42,14 @@ typedef struct {
 
 typedef union {
 	struct {
-		guint code;
+		guint64 code;
 		GbdKeyModifier modifier;
 	} action;
 	gchar* exec;
 } GbdKeyAction;
 
 typedef struct {
-	GbdKeyModifier modifier;
+	GbdKeyModifier filter;
 	gboolean is_image;
 	gchar* label;
 	gboolean is_exec;
@@ -62,7 +62,9 @@ typedef struct {
 } GbdKeyGroup;
 
 gboolean gbd_layout_parse( GbdLayout*,gchar*,GError** );
-GbdKey* gbd_layout_at( GbdLayout*,gint,gint,guint );
+gboolean gbd_key_is_mod( const GbdKey* );
+const GbdKeyGroup* gbd_layout_at( GbdLayout*,gint,gint );
+const GbdKey* gbd_key_current( const GbdKeyGroup*,GbdKeyModifier,GbdKeyModifier,gboolean );
 
 GType gbd_layout_get_type( void );
 GbdLayout* gbd_layout_new( gchar*,GbdEmitter* );
