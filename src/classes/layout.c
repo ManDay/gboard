@@ -187,7 +187,8 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 	if( result->is_exec )
 		result->action.exec = exec;
 	else {
-		result->action.action.code = gbd_emitter_get_code( emitter,code );
+		if( !( result->action.action.code = gbd_emitter_get_code( emitter,code ) ) )
+			g_warning( "Could not find code for key '%s' with label '%s'",code,result->label );
 		result->action.action.modifier = spawn_modifier( modlist,mod );
 		g_free( exec );
 	}

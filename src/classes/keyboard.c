@@ -205,6 +205,8 @@ static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
 
 	if( grp && !is_pressed_key( self,grp ) ) {
 		const GbdKey* key = current_key( self,grp );
+		if( !key->is_exec )
+			gbd_emitter_emit( priv->emitter,key->action.action.code );
 		if( gbd_key_is_mod( key ) ) {
 			release_all_keys( self );
 			if( priv->mod.id==key->action.action.modifier.id ) {
@@ -234,8 +236,6 @@ static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
 				priv->invertmod = FALSE;
 			}
 		}
-		if( !key->is_exec )
-			gbd_emitter_emit( priv->emitter,key->action.action.code );
 		set_pressed_key( self,pointer,grp );
 		gtk_widget_queue_draw( _self );
 	}
@@ -254,6 +254,8 @@ static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
 	if( grp = get_pressed_key( self,pointer ) ) {
 		const GbdKey* key = current_key( self,grp );
 		set_pressed_key( self,pointer,NULL );
+		if( !key->is_exec );
+			gbd_emitter_release( priv->emitter,key->action.action.code );
 		if( gbd_key_is_mod( key ) ) {
 			if( priv->planrelease )
 				if( priv->invertmod )

@@ -4,6 +4,7 @@ project( GBoard C )
 
 set( GBD_BUILD_GTK_IM TRUE CACHE BOOL "Whether to build the GTK IM-Module" )
 set( GBD_INSTALL_LAYOUTS TRUE CACHE BOOL "Whether to install layouts" )
+set( GBD_BUILD_X11 TRUE CACHE BOOL "Whether to build the X11-Emitter" )
 set( GBD_NAME "org.gitorious.gboard" CACHE STRING "Unique dot separated name for GBoard" )
 set( GBD_PATH "/org/gitorious/gboard" CACHE STRING "Unique slash separated path for GBoard - must not end with a slash" )
 set( GBD_SCHEMAS_PATH "share/glib-2.0/schemas" CACHE PATH "Install path for schema definition" )
@@ -23,20 +24,29 @@ else( )
 	set( GBD_GTK_IM_TARGET "${CMAKE_INSTALL_PREFIX}/${GBD_GTK_IM_PATH}" )
 endif( )
 
+include( FindPkgConfig )
+
+pkg_check_modules( GTK REQUIRED gtk+-3.0 )
+include_directories( ${GTK_INCLUDE_DIRS} )
+link_directories( ${GTK_LIBRARY_DIRS} )
+
+if( GBD_BUILD_X11 )
+	find_package( X11 REQUIRED )
+	include_directories( ${X11_XTest_INCLUDE_PATH} )
+	set( GBD_X11_INCLUDE "${X11_X11_INCLUDE_PATH}" )
+	message( STATUS "Reading GBoard X11-Emitter key definitions from ${X11_X11_INCLUDE_PATH}" )
+endif( )
+
 set( GBD_PATH_TERMED "${GBD_PATH}/" )
 configure_file( src/org.gitorious.gboard.gschema.xml org.gitorious.gboard.gschema.xml )
 configure_file( src/gbd_config.h src/gbd_config.h )
 include_directories( "${CMAKE_BINARY_DIR}/src" BEFORE )
 
-include( FindPkgConfig )
-
-pkg_check_modules( GTK REQUIRED gtk+-3.0 )
-
-include_directories( ${GTK_INCLUDE_DIRS} )
-link_directories( ${GTK_LIBRARY_DIRS} )
-
 add_executable( gboard src/main.c src/classes/app.c src/classes/x11emitter.c src/interfaces/emitter.c src/classes/layout.c src/classes/keyboard.c )
 target_link_libraries( gboard ${GTK_LDFLAGS} )
+if( GBD_BUILD_X11 )
+	target_link_libraries( gboard ${X11_XTest_LIB} )
+endif( )
 
 if( GBD_BUILD_GTK_IM )
 	add_library( gboardim MODULE src/gboardim.c )

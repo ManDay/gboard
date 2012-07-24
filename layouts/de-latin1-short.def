@@ -1,9 +1,9 @@
-{{dead_circumflex ^}s{degree °}} {{1}s{exclam !}} {{2}s{quotedbl "}g{twosuperior 2}} {{3}s{paragraph §}g{threesuperior 3}} {{4}s{dollar $}} {{5}s{percent}} {{6}s{ampersand &}} {{7}s{slash /}g{braceleft \{}} {{8}s{parenleft \(}g{bracketleft [}} {{9}s{parenright \)}g{bracketright ]}} {{0}s{equal =}g{braceright \}}} {{ssharp ß}s{question ?}g{backslash \\}} {{dead_breve '}s{dead_grave `}} {{backspace <-}}}} {{Delete Entf}s{Insert Einfg}__}
+{{dead_circumflex ^}s{degree °}} {{1}s{exclam !}} {{2}s{quotedbl "}g{twosuperior 2}} {{3}s{paragraph §}g{threesuperior 3}} {{4}s{dollar $}} {{5}s{percent}} {{6}s{ampersand &}} {{7}s{slash /}g{braceleft \{}} {{8}s{parenleft \(}g{bracketleft [}} {{9}s{parenright \)}g{bracketright ]}} {{0}s{equal =}g{braceright \}}} {{ssharp ß}s{question ?}g{backslash \\}} {{dead_breve '}s{dead_grave `}} {{BackSpace <-}}}} {{Delete Entf}s{Insert Einfg}__}
 
-{Tab}} {{q}S{Q}} {{w}S{W}} {{e}S{E}g{EuroSign EUR}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{tilde ~}} {} {{Return Enter}__}
+{Tab}} {{q}S{Q}} {{w}S{W}} {{e}S{E}g{EuroSign EUR}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{dead_tilde ~}} {} {{Return Enter}__}
 
 {{{Caps_Lock S} CAPS}}}} {{a}S{A}} {{s}S{S}} {{d}S{D}} {{f}S{F}} {{g}S{G}} {{h}S{H}} {{j}S{J}} {{k}S{K}} {{l}S{L}} {{odiaeresis ö}S{Odiaeresis Ö}} {{adiaeresis ä}S{Adiaeresis Ä}} {{numbersign #}S{apostrophe '}} {Page_Up PU}
 
-{{{Shift_L s} SHIFT}}} {{less <}s{greater >}g{bar |}} {{y}s{Y}} {{x}s{X}} {{c}s{C}} {{v}s{V}} {{b}s{B}} {{n}s{N}} {{m}s{M}g{mu µ}} {{comma ,}s{semicolon ;}} {{period .}s{colon :}} {{hyphen -}s{underscore _}} {{{Shift_R s}SHIFT}}} {Up ^} {Page_Down PD}
+{{{Shift_L s} SHIFT}S{{Shift_L s} shift}}} {{less <}s{greater >}g{bar |}} {{y}S{Y}} {{x}S{X}} {{c}S{C}} {{v}S{V}} {{b}S{B}} {{n}S{N}} {{m}S{M}g{mu µ}} {{comma ,}s{semicolon ;}} {{period .}s{colon :}} {{hyphen -}s{underscore _}} {{{Shift_R s}SHIFT}}} {Up ^} {Page_Down PD}
 
 {{{Control_L c} STRG}}} {{{Super_L w} WIN}}} {{{Meta_L m} ALT}}} {{space  }}}}}}}}}} {{{Meta_R g} ALTGR}}} {(gboard --preferences) GBD...}}} {Left <} {Down v} {Right >}
