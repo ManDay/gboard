@@ -250,18 +250,6 @@ static void release_all_keys( GbdKeyboard* self ) {
 	}
 }
 
-static void dbg_print_mod_stack( GbdKeyboard* self ) {
-	GbdKeyboardPrivate* const priv = self->priv;
-	guint i;
-	for( i = 0; i<g_queue_get_length( priv->modstack ); i++ ) {
-		ModElement* el = g_queue_peek_nth( priv->modstack,i );
-		if( el )
-			g_print( "Modifier #%i:\tID: %i\t\tSticky: %s\tAssociated key: '%s'\n",i,el->mod.id,el->mod.sticky?"Yes":"No",el->key->label );
-		else
-			g_print( "Modifier #%i:\tID: (nil)\tSticky: (nil)\tAssociated key: (nil)\n",i );
-	}
-}
-
 static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
 	GbdKeyboard* const self = GBD_KEYBOARD( _self );
 	GbdKeyboardPrivate* const priv = self->priv;
@@ -359,35 +347,41 @@ static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
 	set_pressed_key( self,pointer,NULL );
 	if( grp && !is_pressed_key( self,grp ) ) {
 		const GbdKey* const key = key_at( self,grp->col,grp->row );
-		if( key->is_exec )
-		else {
-			if( gbd_key_is_mod( key ) ) {
-				ModElement* model = is_active_mod( self,key->action.action.modifier,TRUE );
-				if( !model )
-					g_warning( "Detected release of modifier which is not in modifier stack" );
-				else {
-					if( key->action.action.modifier.sticky )
-						gbd_emitter_release( priv->emitter,key->action.action.code );
-					if( model->release )
-						remove_active_mod( self,key->action.action.modifier );
+		if( gbd_key_is_mod( key ) ) {
+			ModElement* model = is_active_mod( self,key->action.action.modifier,TRUE );
+			if( !model )
+				g_warning( "Detected release of modifier which is not in modifier stack" );
+			else {
+				if( key->action.action.modifier.sticky )
+					gbd_emitter_release( priv->emitter,key->action.action.code );
+				if( model->release )
+					remove_active_mod( self,key->action.action.modifier );
+			}
+			generate_cache( self );
+		} else {
+			if( key->is_exec ) {
+				gchar** argv = g_strsplit( key->action.exec," ",0 );
+				GError* err;
+				if( !g_spawn_async( NULL,argv,NULL,G_SPAWN_SEARCH_PATH,NULL,NULL,NULL,&err ) ) {
+					g_warning( "Could not spawn process '%s': %s\n",key->action.exec,err->message );
+					g_error_free( err );
+				}
+				g_strfreev( argv );
+			} else
+				gbd_emitter_release( priv->emitter,key->action.action.code );
+			if( !is_pressed_key( self,NULL ) ) {
+				guint i = 1;
+				guint imax = g_queue_get_length( priv->modstack );
+				while( i<imax ) {
+					const ModElement* const el = g_queue_peek_nth( priv->modstack,i );
+					if( !el->mod.sticky ) {
+						gbd_emitter_release( priv->emitter,el->key->action.action.code );
+						g_free( g_queue_pop_nth( priv->modstack,i ) );
+						imax--;
+					} else
+						i++;
 				}
 				generate_cache( self );
-			} else {
-				gbd_emitter_release( priv->emitter,key->action.action.code );
-				if( !is_pressed_key( self,NULL ) ) {
-					guint i = 1;
-					guint imax = g_queue_get_length( priv->modstack );
-					while( i<imax ) {
-						const ModElement* const el = g_queue_peek_nth( priv->modstack,i );
-						if( !el->mod.sticky ) {
-							gbd_emitter_release( priv->emitter,el->key->action.action.code );
-							g_free( g_queue_pop_nth( priv->modstack,i ) );
-							imax--;
-						} else
-							i++;
-					}
-					generate_cache( self );
-				}
 			}
 		}
 		gtk_widget_queue_draw( _self );

@@ -1,0 +1,5 @@
+{{q}S{Q}} {{w}S{W}} {{e}S{E}g{EuroSign EUR}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{dead_tilde ~}} {{BackSpace <-}}}
+
+{} {{a}S{A}} {{s}S{S}} {{d}S{D}} {{f}S{F}} {{g}S{G}} {{h}S{H}} {{j}S{J}} {{k}S{K}} {{l}S{L}} {{odiaeresis ö}S{Odiaeresis Ö}} {{adiaeresis ä}S{Adiaeresis Ä}} {{numbersign #}S{apostrophe '}} {Return Enter}
+
+{{{Shift_L s} SHIFT}S{{Shift_L s} shift}a{(gboard -l /tmp/gbd/install/share/gboard/layouts/de-latin1-short.gboard) Short}} {{less <}s{greater >}g{bar |}} {{y}S{Y}} {{x}S{X}} {{c}S{C}} {{v}S{V}} {{b}S{B}} {{n}S{N}} {{m}S{M}g{mu µ}} {{comma ,}s{semicolon ;}} {{period .}s{colon :}} {{hyphen -}s{underscore _}} {{{a} More}}

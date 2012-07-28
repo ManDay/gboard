@@ -1,11 +1,11 @@
 <schemalist><schema id="${GBD_NAME}" path="${GBD_PATH_TERMED}">
 	<key name="keywidth" type="i">
 		<range min="1" />
-		<default>80</default>
+		<default>50</default>
 	</key>
 	<key name="keyheight" type="i">
 		<range min="1" />
-		<default>60</default>
+		<default>50</default>
 	</key>
 	<key name="maxheight" type="d">
 		<range min="0" max="1" />

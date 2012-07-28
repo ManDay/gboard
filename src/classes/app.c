@@ -43,6 +43,10 @@ static void dbus_unregister( GApplication*,GDBusConnection*,const gchar* );
 static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GError*,gpointer );
 static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
 
+static void show_board( GbdApp* );
+static void hide_board( GbdApp* );
+static void configure_window( GbdApp* );
+static gboolean map_hnd( GtkWidget*,GdkEvent*,GbdApp* );
 static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
 static void activate_layout( GbdApp*,GbdLayout* );
 static void show_prefs( GbdApp* );
@@ -101,12 +105,12 @@ static void startup( GApplication* _self ) {
 
 	priv->window = GTK_WINDOW( gtk_window_new( GTK_WINDOW_TOPLEVEL ) );
 	gtk_window_set_title( priv->window,"GBoard" );
-	gtk_window_set_accept_focus( priv->window,FALSE );
-	gtk_window_set_keep_above( priv->window,TRUE );
-	gtk_window_stick( priv->window );
 	gtk_window_set_skip_taskbar_hint( priv->window,TRUE );
 	gtk_window_set_decorated( priv->window,FALSE );
+	GtkWidget* winwidget = GTK_WIDGET( priv->window );
+
 	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd2,self );
+	g_signal_connect( priv->window,"map-event",(GCallback)map_hnd,self );
 
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
 	g_datalist_init( &priv->layouts );
@@ -120,6 +124,12 @@ static void startup( GApplication* _self ) {
 	g_settings_bind( priv->settings,"ypadding",priv->keyboard,"ypadding",G_SETTINGS_BIND_DEFAULT );
 
 	g_signal_connect( priv->keyboard,"mask-change",(GCallback)update_regions,_self );
+
+	gchar* defaultlayout = g_settings_get_string( priv->settings,"layout" );
+	GFile* file = g_file_new_for_path( defaultlayout );
+	load_layout( self,file,FALSE,NULL );
+	g_object_unref( file );
+	g_free( defaultlayout );
 }
 
 static void activate( GApplication* _self ) {
@@ -130,7 +140,8 @@ static void activate( GApplication* _self ) {
 }
 
 static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
-	GbdAppPrivate* const priv = GBD_APP( _self )->priv;
+	GbdApp* self = GBD_APP( _self );
+	GbdAppPrivate* const priv = self->priv;
 	
 	gint argc;
 	gchar** argv = g_application_command_line_get_arguments( cl,&argc );
@@ -138,12 +149,17 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 	GOptionContext* oc = g_option_context_new( "" );
 
 	gchar** layouts = NULL;
-	gboolean force = FALSE,prefs = FALSE;
+	gboolean force = FALSE,
+		prefs = FALSE,
+		hide = FALSE,
+		show = FALSE;
 
 	GOptionEntry options[ ]= {
-		{ "layout",'l',0,G_OPTION_ARG_FILENAME_ARRAY,&layouts,"Layout to use. Multiple layouts are preloaded, the last is activated","layout" },
-		{ "force",'f',0,G_OPTION_ARG_NONE,&force,"Force reload of layout. Do not use cached layout",NULL },
-		{ "preferences",'p',0,G_OPTION_ARG_NONE,&prefs,"Display Preferences",NULL },
+		{ "layout",'l',0,G_OPTION_ARG_FILENAME_ARRAY,&layouts,"Layout to use. Multiple layouts are preloaded, the last is activated.","layout" },
+		{ "force",'f',0,G_OPTION_ARG_NONE,&force,"Force reload of layout. Do not use cached layout.",NULL },
+		{ "hide",'h',0,G_OPTION_ARG_NONE,&hide,"Hide GBoard.",NULL },
+		{ "show",'s',0,G_OPTION_ARG_NONE,&show,"Show GBoard. Use together with -h to redock, if docking is enabled.",NULL },
+		{ "preferences",'p',0,G_OPTION_ARG_NONE,&prefs,"Display Preferences dialog.",NULL },
 		NULL
 	};
 
@@ -155,7 +171,7 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 		GbdLayout* lastvalid = NULL;
 		while( layouts && layouts[ i ] ) {
 			GFile* file = g_file_new_for_commandline_arg( layouts[ i ] );
-			if( !load_layout( GBD_APP( _self ),file,force,&err ) ) {
+			if( !load_layout( self,file,force,&err ) ) {
 				g_critical( "GBoard could not parse layoutfile '%s': %s",layouts[ i ],err->message );
 				g_error_free( err );
 				err = NULL;
@@ -166,7 +182,11 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 		g_strfreev( layouts );
 
 		if( prefs )
-			show_prefs( GBD_APP( _self ) );
+			show_prefs( self );
+		if( hide )
+			hide_board( self );
+		if( show )
+			show_board( self );
 	} else {
 		g_error( "GBoard could not parse commandline: %s",err->message );
 		g_error_free( err );
@@ -232,23 +252,9 @@ static gboolean load_layout( GbdApp* self,GFile* file,gboolean force,GError** er
 
 static void activate_layout( GbdApp* self,GbdLayout* layout ) {
 	GbdAppPrivate* const priv = self->priv;
-	guint width,height;
 
-	g_object_get( layout,"width",&width,"height",&height,NULL );
-	const guint keywidth = g_settings_get_int( priv->settings,"keywidth" );
-	const guint keyheight = g_settings_get_int( priv->settings,"keyheight" );
-	const gdouble maxheight = g_settings_get_double( priv->settings,"maxheight" )*gdk_screen_height( );
-
-	gdouble scale = 1;
-
-	if( height*keyheight>maxheight )
-		scale = maxheight/( height*keyheight );
-
-	if( width*keywidth*scale>gdk_screen_width( ) )
-		scale = gdk_screen_width( )/(gdouble)( width*keywidth );
-
-	gtk_window_resize( priv->window,width*keywidth*scale,height*keyheight*scale );
 	g_object_set( priv->keyboard,"layout",layout,NULL );
+	configure_window( self );
 }
 
 static void show_board( GbdApp* self ) {
@@ -314,6 +320,57 @@ static void show_prefs_hnd( GSimpleAction* action,GVariant* parms,gpointer _self
 
 static gboolean hide_board_hnd2( GtkWidget* widget,GdkEvent* ev,GbdApp* self ) {
 	hide_board( self );
+}
+
+static void configure_window( GbdApp* self ) {
+	GbdAppPrivate* const priv = self->priv;
+
+	GbdLayout* layout;
+	guint cols,rows;
+
+	g_object_get( priv->keyboard,"layout",&layout,NULL );
+	g_object_get( layout,"width",&cols,"height",&rows,NULL );
+
+	const guint keywidth = g_settings_get_int( priv->settings,"keywidth" );
+	const guint keyheight = g_settings_get_int( priv->settings,"keyheight" );
+	const gdouble maxheight = g_settings_get_double( priv->settings,"maxheight" )*gdk_screen_height( );
+
+	gdouble scale = 1;
+	if( rows*keyheight>maxheight )
+		scale = maxheight/( rows*keyheight );
+	if( cols*keywidth*scale>gdk_screen_width( ) )
+		scale = gdk_screen_width( )/(gdouble)( cols*keywidth );
+	
+	const gint height = rows*keyheight*scale;
+	const gint width = cols*keywidth*scale;
+
+/* One would think that setting the window's gravity to the edge on
+ * which it docks makes sense. In fact, trying to do that will cause the
+ * resize & move to fail. I cannot make sense of this, but it seems to
+ * work without gravity, so I'll just go with that. */
+	if( priv->docked ) {
+		if( priv->north ) {
+			gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,0 );
+		} else {
+			gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,gdk_screen_height( )-height );
+		}
+	}
+	gtk_window_resize( priv->window,width,height );
+}
+
+static gboolean map_hnd( GtkWidget* win,GdkEvent* ev,GbdApp* self ) {
+	GbdAppPrivate* const priv = self->priv;
+
+	priv->docked = g_settings_get_boolean( priv->settings,"docked" );
+	priv->north = g_settings_get_boolean( priv->settings,"north" );
+
+	gtk_window_set_accept_focus( priv->window,FALSE );
+	gtk_window_set_keep_above( priv->window,TRUE );
+	gtk_window_stick( priv->window );
+
+	configure_window( self );
+
+	return FALSE;
 }
 
 GType gbd_app_get_type( ) {

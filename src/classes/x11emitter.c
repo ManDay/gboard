@@ -129,12 +129,14 @@ static guint64 get_code( GbdEmitter* _self,gchar* key ) {
 
 static void emit( GbdEmitter* self,guint64 _code ) {
 	unsigned int code = _code;
-	XTestFakeKeyEvent( GBD_X11EMITTER( self )->priv->dpy,code,1,1 );
+	if( code )
+		XTestFakeKeyEvent( GBD_X11EMITTER( self )->priv->dpy,code,1,1 );
 }
 
 static void release( GbdEmitter* self,guint64 _code ) {
 	unsigned int code = _code;
-	XTestFakeKeyEvent( GBD_X11EMITTER( self )->priv->dpy,code,0,1 );
+	if( code )
+		XTestFakeKeyEvent( GBD_X11EMITTER( self )->priv->dpy,code,0,1 );
 }
 
 GType gbd_x11emitter_get_type( ) {
