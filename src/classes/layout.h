@@ -64,7 +64,7 @@ typedef struct {
 gboolean gbd_layout_parse( GbdLayout*,gchar*,GError** );
 gboolean gbd_key_is_mod( const GbdKey* );
 const GbdKeyGroup* gbd_layout_at( GbdLayout*,gint,gint );
-const GbdKey* gbd_key_current( const GbdKeyGroup*,GbdKeyModifier,GbdKeyModifier,gboolean );
+const GbdKey* gbd_key_current( const GbdKeyGroup*,GQueue* );
 
 GType gbd_layout_get_type( void );
 GbdLayout* gbd_layout_new( gchar*,GbdEmitter* );

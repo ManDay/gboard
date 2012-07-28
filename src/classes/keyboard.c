@@ -21,13 +21,36 @@ enum {
 struct GbdKeyboardPrivate {
 	GbdLayout* layout;
 	gdouble xpadding,ypadding;
-	GbdKeyModifier mod,oldmod;
-	GPtrArray* pressed;
-	GPtrArray* cached_groups;
 	GbdEmitter* emitter;
+
+	GQueue* modstack;
+/**< Release Stack
+ *
+ * With every modifier in the modifier stack is associated a
+ * boolean-type release state. For sticky modifiers, that state is TRUE
+ * if and only if the sticky modifier was pressed while it was active,
+ * indicating that on the following release, the modifier is expected to
+ * be dismissed from the stack. For non-sticky modifiers, the release
+ * state is TRUE if the modifier was pressed while it was active,
+ * indicating that on the following release, it's expected to dismissed,
+ * or if an ordinary key was pressed while it was pressed, due to
+ * multi-pointer.
+ * Generally, the release stack indicates whether a modifier should be
+ * dimissed when it's released.
+ */
+
+	GPtrArray* pressed;
+	GPtrArray* keycache;
+
+	GPtrArray* cached_groups;
 	guint cached_width,cached_height;
-	gboolean planrelease,invertmod;
 };
+
+typedef struct {
+	GbdKeyModifier mod;
+	gboolean release;
+	const GbdKey* key;
+} ModElement;
 
 struct DrawInfo {
 	GbdKeyboard* self;
@@ -51,7 +74,10 @@ static gboolean draw( GtkWidget*,cairo_t* );
 static gboolean button_press_event( GtkWidget*,GdkEventButton* );
 static gboolean button_release_event( GtkWidget*,GdkEventButton* );
 
-static const GbdKey* current_key( GbdKeyboard*,const GbdKeyGroup* );
+static void remove_active_mod( GbdKeyboard*,const GbdKeyModifier );
+static ModElement* is_active_mod( GbdKeyboard*,GbdKeyModifier,gboolean );
+static const generate_cache( GbdKeyboard* );
+static const GbdKey* key_at( GbdKeyboard*,const guint,const guint );
 static GbdKeyGroup* get_pressed_key( GbdKeyboard*,guint );
 static void set_pressed_key( GbdKeyboard*,guint,const GbdKeyGroup* );
 static gboolean is_pressed_key( GbdKeyboard*,const GbdKeyGroup* );
@@ -59,7 +85,6 @@ static void mask_change( GbdKeyboard*,gpointer );
 static void accumulate_regions( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,cairo_region_t* );
 static void draw_key( gdouble,gdouble,gdouble,gdouble,GbdKeyGroup*,struct DrawInfo* );
 static gboolean foreach_key( GbdKeyboard*,KeyOperation,gpointer );
-static void release_all_keys( GbdKeyboard* );
 
 static void class_init( GbdKeyboardClass* klass,gpointer udata ) {
 	GObjectClass* klass_go = G_OBJECT_CLASS( klass );
@@ -106,11 +131,20 @@ static void set_property( GObject* _self,guint prop,const GValue* value,GParamSp
 		if( priv->layout ) {
 			g_object_unref( priv->layout );
 			g_ptr_array_unref( priv->cached_groups );
+			g_ptr_array_unref( priv->keycache );
+			g_ptr_array_unref( priv->pressed );
+			g_queue_free_full( priv->modstack,g_free );
 		}
 		priv->layout = g_value_dup_object( value );
-		if( priv->layout )
+		if( priv->layout ) {
 			g_object_get( priv->layout,"groups",&priv->cached_groups,"width",&priv->cached_width,"height",&priv->cached_height,"emitter",&priv->emitter,NULL );
-		else
+			priv->keycache = g_ptr_array_new( );
+			g_ptr_array_set_size( priv->keycache,priv->cached_width*priv->cached_height );
+			priv->pressed = g_ptr_array_new( );
+			priv->modstack = g_queue_new( );
+			g_queue_push_tail( priv->modstack,NULL );
+			generate_cache( GBD_KEYBOARD( _self ) );
+		} else
 			priv->cached_groups = NULL;
 		break;
 	case PROP_XPADDING:
@@ -162,7 +196,7 @@ static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
 	for( i = 0; i<priv->pressed->len; i++ ) {
 		const GbdKeyGroup* grp = get_pressed_key( self,i );
 		if( grp ) {
-			const GbdKey* key = current_key( self,grp );
+			const GbdKey* key = key_at( self,grp->col,grp->row );
 			if( !gbd_key_is_mod( key ) ) {
 				const gdouble x = ceil( grp->col*cellwidth+priv->xpadding*cellwidth );
 				const gdouble y = ceil( grp->row*cellheight+priv->ypadding*cellheight );
@@ -175,6 +209,57 @@ static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
 	}		
 
 	return TRUE;
+}
+
+static const generate_cache( GbdKeyboard* self ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	const GbdKey** keycache = (const GbdKey**)priv->keycache->pdata;
+	for( i = 0; i<priv->cached_groups->len; i++ ) {
+		const GbdKeyGroup* const grp = g_ptr_array_index( priv->cached_groups,i );
+		guint row;
+		for( row = 0; row<grp->rowspan; row++ ) {
+			guint col;
+			for( col = 0; col<grp->colspan; col++ )
+				keycache[ ( grp->row+row )*priv->cached_width+grp->col+col ]= gbd_key_current( grp,priv->modstack );
+		}
+	}
+}
+
+static const GbdKey* key_at( GbdKeyboard* self,const guint x,const guint y ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	if( x<priv->cached_width && y<priv->cached_height )
+		return g_ptr_array_index( priv->keycache,y*priv->cached_width+x );
+	else
+		return NULL;
+}
+
+static void release_all_keys( GbdKeyboard* self ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	for( i = 0; i<priv->pressed->len; i++ ) {
+		const GbdKeyGroup* grp;
+		if( grp = g_ptr_array_index( priv->pressed,i ) ) {
+			const GbdKey* key = key_at( self,grp->col,grp->row );
+			if( !gbd_key_is_mod( key ) ) {
+				if( !key->is_exec )
+					gbd_emitter_release( priv->emitter,key->action.action.code );
+				g_ptr_array_index( priv->pressed,i )= NULL;
+			}
+		}
+	}
+}
+
+static void dbg_print_mod_stack( GbdKeyboard* self ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	for( i = 0; i<g_queue_get_length( priv->modstack ); i++ ) {
+		ModElement* el = g_queue_peek_nth( priv->modstack,i );
+		if( el )
+			g_print( "Modifier #%i:\tID: %i\t\tSticky: %s\tAssociated key: '%s'\n",i,el->mod.id,el->mod.sticky?"Yes":"No",el->key->label );
+		else
+			g_print( "Modifier #%i:\tID: (nil)\tSticky: (nil)\tAssociated key: (nil)\n",i );
+	}
 }
 
 static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
@@ -191,93 +276,154 @@ static gboolean button_press_event( GtkWidget* _self,GdkEventButton* ev ) {
 
 	// TODO : Consistency check may be removed
 	const GbdKeyGroup* grp;
-	if( grp = get_pressed_key( self,pointer ) ) {
-		const GbdKey* key = current_key( self,grp );
-		if( !key->is_exec ) {
-			g_warning( "GBoard detected inconsistent pointer event - Forcefully releasing key %li",key->action.action.code );
-			gbd_emitter_release( priv->emitter,key->action.action.code );
-		}
-	}
 
 	gint x = priv->cached_width*ev->x/gtk_widget_get_allocated_width( _self );
 	gint y = priv->cached_height*ev->y/gtk_widget_get_allocated_height( _self );
 	grp = gbd_layout_at( priv->layout,x,y );
+	const GbdKey* const key = key_at( self,x,y );
 
-	if( grp && !is_pressed_key( self,grp ) ) {
-		const GbdKey* key = current_key( self,grp );
-		if( !key->is_exec )
-			gbd_emitter_emit( priv->emitter,key->action.action.code );
-		if( gbd_key_is_mod( key ) ) {
-			release_all_keys( self );
-			if( priv->mod.id==key->action.action.modifier.id ) {
-				// Very same modifier
-				if( priv->mod.sticky==key->action.action.modifier.sticky )
-					priv->planrelease = TRUE;
-				else {
-					// Same but non-sticky
-					if( priv->mod.sticky )
-						if( priv->invertmod )
-							priv->planrelease = TRUE;
-						else {
-							priv->planrelease = FALSE;
-							priv->invertmod = TRUE;
-						}
-					// Same but sticky
-					else {
-						priv->mod = key->action.action.modifier;
-						priv->planrelease = FALSE;
-						priv->invertmod = FALSE;
-					}
-				}
-			} else {
-				priv->oldmod = priv->mod;
-				priv->mod = key->action.action.modifier;
-				priv->planrelease = FALSE;
-				priv->invertmod = FALSE;
-			}
-		}
+/* In the following, "active" refers to a key being held down, either
+ * actively by the user or through automatic hold (as with modifiers)
+ * whereas "pressed" refers to the key actually being kept track of as
+ * "pressed by a particular pointer". Therefore, all pressed keys are
+ * active, but not all active keys are pressed (e.g. modifiers).
+ * 
+ * Policy:
+ *
+ * If no key is hit, drop out immediately. Otherwise, register the press
+ * in the list of pointers and their associated key presses. Drop out
+ * then, if it's already pressed. Otherwise, go on.
+ *
+ * If the key is an exec, nothing happens. All exec operations are
+ * performed upon release.
+ *
+ * If the key is ordinary, schedule all non-sticky modifiers for
+ * releasem, emit it and we're done. If the key is a modifier, different
+ * things may happen depending on the current modstack and sticky
+ * states:
+ *
+ * If the modifier is already active with the same sticky state as it
+ * was pressed, emit it and schedule its release if it's sticky.
+ *
+ * Otherwise, if the modifier is already active with the sticky
+ * state, emit it, and add it to the modifier stack.
+ *
+ * Otherwise, emit it and add it to the modifier stack.
+ */
+	if( grp ) {
+		gboolean pressed = is_pressed_key( self,grp );
 		set_pressed_key( self,pointer,grp );
+		if( !pressed && !key->is_exec ) {
+			if( gbd_key_is_mod( key ) ) {
+				ModElement* mod;
+				if( mod = is_active_mod( self,key->action.action.modifier,TRUE ) ) {
+					mod->release = TRUE;
+					if( !key->action.action.modifier.sticky )
+						return;
+				} else {
+					release_all_keys( self );
+					ModElement el = { key->action.action.modifier,FALSE,key };
+					g_queue_push_tail( priv->modstack,g_memdup( &el,sizeof( ModElement ) ) );
+				}
+				generate_cache( self );
+			}
+			gbd_emitter_emit( priv->emitter,key->action.action.code );
+		}
 		gtk_widget_queue_draw( _self );
 	}
-}
-
-static const GbdKey* current_key( GbdKeyboard* self,const GbdKeyGroup* grp ) {
-	return gbd_key_current( grp,self->priv->oldmod,self->priv->mod,self->priv->invertmod );
 }
 
 static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
 	GbdKeyboard* const self = GBD_KEYBOARD( _self );
 	GbdKeyboardPrivate* const priv = self->priv;
 	guint pointer = 0;
-
-	const GbdKeyGroup* grp;
-	if( grp = get_pressed_key( self,pointer ) ) {
-		const GbdKey* key = current_key( self,grp );
-		set_pressed_key( self,pointer,NULL );
-		if( !key->is_exec );
-			gbd_emitter_release( priv->emitter,key->action.action.code );
-		if( gbd_key_is_mod( key ) ) {
-			if( priv->planrelease )
-				if( priv->invertmod )
-					priv->invertmod = FALSE;
+/* Key release: The release is only emitted, if no other pointer holds a
+ * press on the specific key. If any other pointer does, the current
+ * releases its press but nothing else happens. Either way, the
+ * pointer's press is released.
+ *
+ * If the key is an exec key, the action is executed.
+ *
+ * If the key is an ordinary key, the release of the code is emitted. If
+ * there are any active non-sticky modifiers, they are purged, provided
+ * no other key, modifier or ordinary, is currently pressed.
+ *
+ * If the key is a sticky modifier, the release of the code is emitted.
+ *
+ * If the key is a modifier and it's scheduled for deactivation as by
+ * the release-stack, it's dismissed and the release is emitted. If it's
+ * sticky, the release-stack is evaluated for compatibility under
+ * removal.
+ */
+	const GbdKeyGroup* const grp = get_pressed_key( self,pointer );
+	set_pressed_key( self,pointer,NULL );
+	if( grp && !is_pressed_key( self,grp ) ) {
+		const GbdKey* const key = key_at( self,grp->col,grp->row );
+		if( key->is_exec )
+		else {
+			if( gbd_key_is_mod( key ) ) {
+				ModElement* model = is_active_mod( self,key->action.action.modifier,TRUE );
+				if( !model )
+					g_warning( "Detected release of modifier which is not in modifier stack" );
 				else {
-					priv->oldmod = (GbdKeyModifier){ 0 };
-					priv->mod = (GbdKeyModifier){ 0 };
+					if( key->action.action.modifier.sticky )
+						gbd_emitter_release( priv->emitter,key->action.action.code );
+					if( model->release )
+						remove_active_mod( self,key->action.action.modifier );
 				}
-		} else {
-			if( !is_pressed_key( self,NULL ) ) {
-				if( priv->invertmod )
-					priv->invertmod = !priv->invertmod;
-				else if( !priv->mod.sticky ) {
-					priv->oldmod = (GbdKeyModifier){ 0 };
-					priv->mod = (GbdKeyModifier){ 0 };
-					priv->planrelease = TRUE;
+				generate_cache( self );
+			} else {
+				gbd_emitter_release( priv->emitter,key->action.action.code );
+				if( !is_pressed_key( self,NULL ) ) {
+					guint i = 1;
+					guint imax = g_queue_get_length( priv->modstack );
+					while( i<imax ) {
+						const ModElement* const el = g_queue_peek_nth( priv->modstack,i );
+						if( !el->mod.sticky ) {
+							gbd_emitter_release( priv->emitter,el->key->action.action.code );
+							g_free( g_queue_pop_nth( priv->modstack,i ) );
+							imax--;
+						} else
+							i++;
+					}
+					generate_cache( self );
 				}
 			}
 		}
 		gtk_widget_queue_draw( _self );
-	} else
-		g_warning( "GBoard detected inconsistent pointer event - Cannot release key for pointer %i",pointer );
+	}
+}
+
+static ModElement* is_active_mod( GbdKeyboard* self,const GbdKeyModifier mod,gboolean strict ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	const guint imax = g_queue_get_length( priv->modstack );
+	for( i = 1; i<imax; i++ ) {
+		ModElement* testmod = g_queue_peek_nth( priv->modstack,i );
+		if( testmod->mod.id==mod.id &&( !strict || testmod->mod.sticky==mod.sticky ) )
+			return testmod;
+	}
+	return NULL;
+}
+
+static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier const mod ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+	guint i;
+	const guint imax = g_queue_get_length( priv->modstack );
+	for( i = 1; i<imax; i++ ) {
+		const ModElement* const testmod = g_queue_peek_nth( priv->modstack,i );
+		if( testmod->mod.id==mod.id && testmod->mod.sticky==mod.sticky )
+			break;
+	}
+	// TODO: You musn't actually clean out ALL Modifiers which are on top
+	// of the current one but only those who have a key which is filtered
+	// to the modifier being removed.
+	while( i<imax ) {
+		ModElement* const popmod = g_queue_pop_tail( priv->modstack );
+		gbd_emitter_release( priv->emitter,popmod->key->action.action.code );
+		g_free( popmod );
+		i++;
+	}
 }
 
 static GbdKeyGroup* get_pressed_key( GbdKeyboard* self,guint pointer ) {
@@ -307,21 +453,6 @@ static void set_pressed_key( GbdKeyboard* self,guint pointer,const GbdKeyGroup* 
 	( (const GbdKeyGroup**)priv->pressed->pdata )[ pointer ]= grp;
 }
 
-static void release_all_keys( GbdKeyboard* self ) {
-	GbdKeyboardPrivate* const priv = self->priv;
-	guint i;
-	for( i = 0; i<priv->pressed->len; i++ ) {
-		const GbdKeyGroup* grp;
-		const GbdKey* key;
-		guint64 code;
-		if( ( grp = g_ptr_array_index( priv->pressed,i ) )&&( key = current_key( self,grp ) ) )
-			if( !key->is_exec &&( code = key->action.action.code ) ) {
-				gbd_emitter_release( priv->emitter,code );
-				g_ptr_array_index( priv->pressed,i )= NULL;
-			}
-	}
-}
-
 static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygrp,struct DrawInfo* info ) {
 	GbdKeyboardPrivate* const priv = info->self->priv;
 	gtk_style_context_add_class( info->style,GTK_STYLE_CLASS_BUTTON );
@@ -334,9 +465,9 @@ static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygr
 	gtk_render_background( info->style,info->cr,x,y,w,h );
 	gtk_render_frame( info->style,info->cr,x,y,w,h );
 
-	const GbdKey* key = current_key( info->self,keygrp );
-	if( gbd_key_is_mod( key )&& key->action.action.modifier.id==priv->mod.id &&
-		( key->action.action.modifier.sticky==priv->mod.sticky || priv->invertmod ) )
+	const GbdKey* key = key_at( info->self,keygrp->col,keygrp->row );
+
+	if( gbd_key_is_mod( key )&& is_active_mod( info->self,key->action.action.modifier,TRUE ) )
 		gtk_render_focus( info->style,info->cr,x,y,w,h );
 
 	cairo_text_extents_t extents;

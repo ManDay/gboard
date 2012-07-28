@@ -35,6 +35,7 @@ static void instance_finalize( GbdLayout* );
 static void set_property( GObject*,guint,const GValue*,GParamSpec* );
 static void get_property( GObject*,guint,GValue*,GParamSpec* );
 
+GbdKey* find_key( const GbdKeyGroup*,const GbdKeyModifier* );
 static void delete_keygroup( GbdKeyGroup* );
 
 static void class_init( GbdLayoutClass* klass,gpointer udata ) {
@@ -408,67 +409,53 @@ gboolean gbd_key_is_mod( const GbdKey* key ) {
 	return !key->is_exec && key->action.action.modifier.id!=0;
 }
 
-const GbdKey* gbd_key_current( const GbdKeyGroup* grp,const GbdKeyModifier oldmod,const GbdKeyModifier newmod,gboolean inverted ){
-/* Which key is in effect, currently? Try to stay consistent and
- * intuitive at the same time!
- * WITHOUT ANY MODIFIER, the according keys which match a no-modifier
- * filter or the first in the list, if all keys of the keygroup have
- * filters.
- * WITH A MODIFIER, WITHOUT INVERSION (i.e. Shift being pressed in Caps
- * Lock), the last key in the list which matches the current modifier by
- * filter, or, preferably, the first key in the list which matches the
- * current old modifier by filter and carries the current modifier
- * exactly (including stick-state).  This ensures that if a modifier is
- * activated, it will not elevate itsself to become something else, but
- * instead stay the modifier. A reasonable application of this
- * (unreasonable straight-ahead usage such as directly stating that a
- * key should become a different key by a filter, which it emits
- * itsself) would be the Caps-Lock and Shift button: Caps-Lock should
- * change Shift to display a different icon (in the sense of temporarily
- * un-locking caps), which means Shift has a filter for sticky
- * Shift-state. A filter for a sticky state always implies being
- * filtered for the non-sticky state, aswell, meaning Shift would listen
- * to its own, non-sticky state, too. To prevent it from assuming its
- * "alternate ego" as it does with Caps-Lock, this mechanism holds it
- * down in the state in which it was found at the time of the press (the
- * old modifier).
- * WITH A MODIFIER, WITH INVERSION, the last key in the list which
- * matches the old modifier by filter, or, preferably, the first key in
- * the list which either
- * - matches the old modifier by filter and carries the new modifier as
- *   sticky (compare Caps-Lock key)
- * or
- * - matches the new modifier in sticky-state by filter and carries the
- *   new modifier as non-sticky (compare Shift key, activated from
- *   within Caps-Lock). */
+const GbdKey* gbd_key_current( const GbdKeyGroup* grp,GQueue* modstack ) {
 	guint i;
-	const GbdKey* result = &grp->keys[ 0 ];
-	const GbdKey* newresult = NULL;
-	const GbdKeyModifier mod = inverted?oldmod:newmod;
-	for( i = 0; i<grp->keycount; i++ ) {
-		const GbdKey* const key = &grp->keys[ i ];
-		if( key->filter.id==mod.id &&( !mod.sticky || key->filter.sticky ) )
-			result = key;
-		if( inverted && key->filter.id==newmod.id && !key->filter.sticky ) 
-			newresult = key;
-		if( newmod.id && gbd_key_is_mod( key ) ) {
-			const GbdKeyModifier keymod = key->action.action.modifier;
-			if( inverted ) {
-				if( ( key->filter.id==oldmod.id &&( oldmod.sticky || key->filter.sticky )
-					&& keymod.id==newmod.id && keymod.sticky )||
-					( key->filter.id==newmod.id && key->filter.sticky && keymod.id==newmod.id && !keymod.sticky ) )
-					return key;
-			} else if( keymod.id==newmod.id &&
-				keymod.sticky==newmod.sticky &&
-				key->filter.id==oldmod.id &&
-				( !oldmod.sticky || key->filter.sticky ) )
-				return key;
+	GQueue* const results = g_queue_new( );
+	// Fallback
+	g_queue_push_tail( results,grp->keys );
+	const guint stacklen = g_queue_get_length( modstack );
+	for( i = 0; i<stacklen; i++ ) {
+		const GbdKeyModifier* const mod = g_queue_peek_nth( modstack,i );
+		const GbdKey* const last = g_queue_peek_tail( results );
+		gboolean undid = FALSE;
+
+		if( mod ) {
+			if( last && gbd_key_is_mod( last )&& last->action.action.modifier.id==mod->id && last->action.action.modifier.sticky==mod->sticky )
+				break;
+					
+			if( !mod->sticky ) {
+				guint n;
+				const guint nmax = g_queue_get_length( results );
+				for( n = 0; n<nmax; n++ ) {
+					const GbdKey* const nth = g_queue_peek_nth( results,n );
+					if( nth->filter.id==mod->id && nth->filter.sticky ) {
+						g_queue_pop_nth( results,n );
+						undid = TRUE;
+						break;
+					}
+				}
+			}
+		}
+		if( !undid ) {
+			GbdKey* const searchresult = find_key( grp,mod );
+			if( searchresult )
+				g_queue_push_tail( results,searchresult );
 		}
 	}
-	if( newresult )
-		return newresult;
-	else
-		return result;
+	GbdKey* result = g_queue_peek_tail( results );
+	g_queue_free( results );
+	return result;
+}
+
+GbdKey* find_key( const GbdKeyGroup* grp,const GbdKeyModifier* const mod ) {
+	guint j;
+	for( j = 0; j<grp->keycount; j++ ) {
+		GbdKey* const key = grp->keys + j;
+		if( !mod && key->filter.id==0 || key->filter.id==mod->id &&( key->filter.sticky || !mod->sticky ) )
+			return key;
+	}
+	return NULL;
 }
 
 GType gbd_layout_get_type( ) {
