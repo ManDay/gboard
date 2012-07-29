@@ -1,9 +1,9 @@
-{{dead_circumflex ^}s{degree °}} {{1}s{exclam !}} {{2}s{quotedbl "}g{twosuperior 2}} {{3}s{paragraph §}g{threesuperior 3}} {{4}s{dollar $}} {{5}s{percent %}} {{6}s{ampersand &}} {{7}s{slash /}g{braceleft \{}} {{8}s{parenleft \(}g{bracketleft [}} {{9}s{parenright \)}g{bracketright ]}} {{0}s{equal =}g{braceright \}}} {{ssharp ß}s{question ?}g{backslash \\}} {{dead_breve '}s{dead_grave `}} {{BackSpace <-}}}} {{Delete Entf}s{Insert Einfg}__}
+{{dead_circumflex ^}s{degree °}} {{1}s{exclam !}} {{2}s{quotedbl "}g{twosuperior ²}} {{3}s{paragraph §}g{threesuperior ³}} {{4}s{dollar $}} {{5}s{percent %}} {{6}s{ampersand &}} {{7}s{slash /}g{braceleft \{}} {{8}s{parenleft \(}g{bracketleft [}} {{9}s{parenright \)}g{bracketright ]}} {{0}s{equal =}g{braceright \}}} {{ssharp ß}s{question ?}g{backslash \\}} {{dead_breve '}s{dead_grave `}} {{BackSpace ⇐}}}} {{Delete Entf}s{Insert Einfg}__}
 
-{Tab}} {{q}S{Q}} {{w}S{W}} {{e}S{E}g{EuroSign EUR}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{dead_tilde ~}} {} {{Return Enter}__}
+{Tab}} {{q}S{Q}} {{w}S{W}} {{e}S{E}g{EuroSign €}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{dead_tilde ~}} {} {{Return ↵}__}
 
-{{{Caps_Lock S} CAPS}}}} {{a}S{A}} {{s}S{S}} {{d}S{D}} {{f}S{F}} {{g}S{G}} {{h}S{H}} {{j}S{J}} {{k}S{K}} {{l}S{L}} {{odiaeresis ö}S{Odiaeresis Ö}} {{adiaeresis ä}S{Adiaeresis Ä}} {{numbersign #}S{apostrophe '}} {Page_Up PU}
+{{{Caps_Lock S} ⇓}}}} {{a}S{A}} {{s}S{S}} {{d}S{D}} {{f}S{F}} {{g}S{G}} {{h}S{H}} {{j}S{J}} {{k}S{K}} {{l}S{L}} {{odiaeresis ö}S{Odiaeresis Ö}} {{adiaeresis ä}S{Adiaeresis Ä}} {{numbersign #}S{apostrophe '}} {Page_Up Pu}
 
-{{{Shift_L s} SHIFT}S{{Shift_L s} shift}}} {{less <}s{greater >}g{bar |}} {{y}S{Y}} {{x}S{X}} {{c}S{C}} {{v}S{V}} {{b}S{B}} {{n}S{N}} {{m}S{M}g{mu µ}} {{comma ,}s{semicolon ;}} {{period .}s{colon :}} {{hyphen -}s{underscore _}} {{{Shift_R s}SHIFT}}} {Up ^} {Page_Down PD}
+{{{Shift_L s} ⇑}}} {{less <}s{greater >}g{bar |}} {{y}S{Y}} {{x}S{X}} {{c}S{C}} {{v}S{V}} {{b}S{B}} {{n}S{N}} {{m}S{M}g{mu µ}} {{comma ,}s{semicolon ;}} {{period .}s{colon :}} {{minus -}s{underscore _}} {{{Shift_R s} ⇑}}} {Up ↑} {Page_Down Pd}
 
-{{{Control_L c} STRG}}} {{{Super_L w} WIN}}} {{{Meta_L m} ALT}}} {{space  }}}}}}}}}} {{{Meta_R g} ALTGR}}} {{(gboard --hide) Hide} s{(gboard --preferences) Preferences}}}} {Left <} {Down v} {Right >}
+{{{Control_L c} Strg}}} {{{Super_L w} □}}} {{{Meta_L m} Alt}}} {{space  }o{(gboard -h) Hide…}}}}}}}}}} {{{ISO_Level3_Shift g} Alt Gr}o{(gboard -p) (/usr/share/icons/LowContrast/48x48/stock/gtk-preferences.png)}}} {{{o} Gboard©}}}} {Left ←} {Down ↓} {Right →}

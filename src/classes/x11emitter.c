@@ -121,6 +121,8 @@ static guint64 get_code( GbdEmitter* _self,gchar* key ) {
 		guint64 codeval = XKeysymToKeycode( priv->dpy,symval );
 		*code = codeval;
 		g_datalist_set_data_full( &priv->mapcache,key,code,g_free );
+		if( !codeval )
+			g_warning( "Could not find code for key '%s', Keysym-Value %i",key,symval );
 		return codeval;
 	}
 

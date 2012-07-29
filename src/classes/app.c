@@ -122,6 +122,8 @@ static void startup( GApplication* _self ) {
 
 	g_settings_bind( priv->settings,"xpadding",priv->keyboard,"xpadding",G_SETTINGS_BIND_DEFAULT );
 	g_settings_bind( priv->settings,"ypadding",priv->keyboard,"ypadding",G_SETTINGS_BIND_DEFAULT );
+	g_settings_bind( priv->settings,"fontsize",priv->keyboard,"fontsize",G_SETTINGS_BIND_DEFAULT );
+	g_settings_bind( priv->settings,"relative",priv->keyboard,"relative",G_SETTINGS_BIND_DEFAULT );
 
 	g_signal_connect( priv->keyboard,"mask-change",(GCallback)update_regions,_self );
 

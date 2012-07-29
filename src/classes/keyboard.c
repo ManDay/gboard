@@ -2,13 +2,13 @@
 
 #include <math.h>
 
-#define DEFAULT_PADDING 0.1
-
 enum {
 	PROP_0,
 	PROP_LAYOUT,
 	PROP_XPADDING,
 	PROP_YPADDING,
+	PROP_FONTSIZE,
+	PROP_RELATIVE,
 	PROP_N
 };
 
@@ -22,6 +22,8 @@ struct GbdKeyboardPrivate {
 	GbdLayout* layout;
 	gdouble xpadding,ypadding;
 	GbdEmitter* emitter;
+	gdouble fontsize;
+	gboolean relative;
 
 	GQueue* modstack;
 /**< Release Stack
@@ -104,8 +106,10 @@ static void class_init( GbdKeyboardClass* klass,gpointer udata ) {
 	klass->mask_change = mask_change;
 
 	props[ PROP_LAYOUT ]= g_param_spec_object( "layout","Layout","Layout of keyboard",GBD_TYPE_LAYOUT,G_PARAM_READWRITE );
-	props[ PROP_XPADDING ]= g_param_spec_double( "xpadding","Padding X","Half of horizontal distance between keys",0,G_MAXDOUBLE,DEFAULT_PADDING,G_PARAM_READWRITE|G_PARAM_CONSTRUCT );
-	props[ PROP_YPADDING ]= g_param_spec_double( "ypadding","Padding Y","Half of vertical distance between keys",0,G_MAXDOUBLE,DEFAULT_PADDING,G_PARAM_READWRITE|G_PARAM_CONSTRUCT );
+	props[ PROP_XPADDING ]= g_param_spec_double( "xpadding","Padding X","Half of horizontal distance between keys",0,G_MAXDOUBLE,1,G_PARAM_READWRITE|G_PARAM_CONSTRUCT );
+	props[ PROP_YPADDING ]= g_param_spec_double( "ypadding","Padding Y","Half of vertical distance between keys",0,G_MAXDOUBLE,1,G_PARAM_READWRITE|G_PARAM_CONSTRUCT );
+	props[ PROP_FONTSIZE ]= g_param_spec_double( "fontsize","Fontsize","Fontsize on keys",0,G_MAXDOUBLE,0.5,G_PARAM_READWRITE|G_PARAM_CONSTRUCT );
+	props[ PROP_RELATIVE ]= g_param_spec_boolean( "relative","Relative fontsize","Wether the size should be interpreted as a fraction of keysize",TRUE,G_PARAM_READWRITE|G_PARAM_CONSTRUCT );
 
 	g_object_class_install_properties( klass_go,PROP_N,props );
 
@@ -153,6 +157,12 @@ static void set_property( GObject* _self,guint prop,const GValue* value,GParamSp
 	case PROP_YPADDING:
 		priv->ypadding = g_value_get_double( value );
 		break;
+	case PROP_FONTSIZE:
+		priv->fontsize = g_value_get_double( value );
+		break;
+	case PROP_RELATIVE:
+		priv->relative = g_value_get_boolean( value );
+		break;
 	}
 	
 	g_signal_emit( _self,sigs[ SIG_MASKCHANGE ],0 );
@@ -170,6 +180,12 @@ static void get_property( GObject* _self,guint prop,GValue* value,GParamSpec* ps
 	case PROP_YPADDING:
 		g_value_set_double( value,priv->ypadding );
 		break;
+	case PROP_FONTSIZE:
+		g_value_set_double( value,priv->fontsize );
+		break;
+	case PROP_RELATIVE:
+		g_value_set_boolean( value,priv->relative );
+		break;
 	}
 }
 
@@ -184,15 +200,18 @@ static gboolean draw( GtkWidget* _self,cairo_t* cr ) {
 	if( !priv->cached_groups )
 		return TRUE;
 
-	struct DrawInfo info = { GBD_KEYBOARD( _self ),gtk_widget_get_style_context( _self ),cr };
-
-	foreach_key( GBD_KEYBOARD( _self ),(KeyOperation)draw_key,&info );
-
-	guint i;
 	const gint width = gtk_widget_get_allocated_width( _self  );
 	const gint height = gtk_widget_get_allocated_height( _self );
 	const gdouble cellwidth = width/(gdouble)priv->cached_width;
 	const gdouble cellheight = height/(gdouble)priv->cached_height;
+	guint i;
+
+	cairo_set_font_size( cr,priv->relative?cellheight*priv->fontsize:priv->fontsize );
+	cairo_select_font_face( cr,"sans-serif",CAIRO_FONT_SLANT_NORMAL,CAIRO_FONT_WEIGHT_BOLD );
+
+	struct DrawInfo info = { GBD_KEYBOARD( _self ),gtk_widget_get_style_context( _self ),cr };
+	foreach_key( GBD_KEYBOARD( _self ),(KeyOperation)draw_key,&info );
+
 	for( i = 0; i<priv->pressed->len; i++ ) {
 		const GbdKeyGroup* grp = get_pressed_key( self,i );
 		if( grp ) {
@@ -400,8 +419,22 @@ static ModElement* is_active_mod( GbdKeyboard* self,const GbdKeyModifier mod,gbo
 	return NULL;
 }
 
-static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier const mod ) {
+/** Removes a modifier from the stack
+ *
+ * Removes a modifier and all modifiers which at least partially
+ * depended on it from the modifier stack. Partial dependence of a
+ * modifier B on a modifier A is defined by modifier A providing at
+ * least one key which provides modifier B. This operation is of course
+ * recursive, so that if there are dependend modifiers being removed,
+ * their dependences are relinquished aswell.
+ *
+ * @param Self
+ * @param Modifier to remove from the stack. If no such modifier is
+ * found, nothing happens
+ */
+static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier mod ) {
 	GbdKeyboardPrivate* const priv = self->priv;
+
 	guint i;
 	const guint imax = g_queue_get_length( priv->modstack );
 	for( i = 1; i<imax; i++ ) {
@@ -409,15 +442,25 @@ static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier const mod 
 		if( testmod->mod.id==mod.id && testmod->mod.sticky==mod.sticky )
 			break;
 	}
-	// TODO: You musn't actually clean out ALL Modifiers which are on top
-	// of the current one but only those who have a key which is filtered
-	// to the modifier being removed.
-	while( i<imax ) {
-		ModElement* const popmod = g_queue_pop_tail( priv->modstack );
-		gbd_emitter_release( priv->emitter,popmod->key->action.action.code );
-		g_free( popmod );
-		i++;
+
+	guint layer = i+1;
+
+	while( layer<g_queue_get_length( priv->modstack ) ) {
+		guint row;
+		for( row = 0; row<priv->cached_height; row++ ) {
+			guint col;
+			for( col = 0; col<priv->cached_width; col++ ) {
+				const GbdKey* key = g_ptr_array_index( priv->keycache,row*priv->cached_width+col );
+				if( key->filter.id==mod.id && gbd_key_is_mod( key ) )
+					remove_active_mod( self,key->action.action.modifier );
+			}
+		}
+		layer++;
 	}
+
+	ModElement* const popmod = g_queue_pop_nth( priv->modstack,i );
+	gbd_emitter_release( priv->emitter,popmod->key->action.action.code );
+	g_free( popmod );
 }
 
 static GbdKeyGroup* get_pressed_key( GbdKeyboard* self,guint pointer ) {
@@ -464,14 +507,35 @@ static void draw_key( gdouble x,gdouble y,gdouble w,gdouble h,GbdKeyGroup* keygr
 	if( gbd_key_is_mod( key )&& is_active_mod( info->self,key->action.action.modifier,TRUE ) )
 		gtk_render_focus( info->style,info->cr,x,y,w,h );
 
-	cairo_text_extents_t extents;
-	cairo_text_extents( info->cr,key->label,&extents );
+	if( key->is_image ) {
+		if( key->label.image ) {
+			gint imagew = gdk_pixbuf_get_width( key->label.image );
+			gint imageh = gdk_pixbuf_get_height( key->label.image );
 
-	const gdouble right = x+w/2-extents.width/2-extents.x_bearing;
-	const gdouble down = y+h/2-extents.height/2-extents.y_bearing;
+			if( imageh>h*0.8 ) {
+				imagew *= 0.8*h/(gdouble)imageh;
+				imageh = h*0.8;
+			}
 
-	cairo_move_to( info->cr,right,down );
-	cairo_show_text( info->cr,key->label );
+			if( imagew>w*0.8 ) {
+				imageh *= 0.8*w/(gdouble)imagew;
+				imagew = w*0.8;
+			}
+
+			GdkPixbuf* scaled = gdk_pixbuf_scale_simple( key->label.image,imagew,imageh,GDK_INTERP_BILINEAR );
+			gtk_render_icon( info->style,info->cr,scaled,x+( w-imagew )/2.0,y+( h-imageh )/2.0 );
+			g_object_unref( scaled );
+		}
+	} else {
+		cairo_text_extents_t extents;
+		cairo_text_extents( info->cr,key->label.text,&extents );
+
+		const gdouble right = x+w/2-extents.width/2-extents.x_bearing;
+		const gdouble down = y+h/2-extents.height/2-extents.y_bearing;
+
+		cairo_move_to( info->cr,right,down );
+		cairo_show_text( info->cr,key->label.text );
+	}
 }
 
 static void mask_change( GbdKeyboard* self,gpointer udata ) {

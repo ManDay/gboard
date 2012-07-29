@@ -2,6 +2,7 @@
 #define __GBD_LAYOUT_H__
 
 #include <glib-object.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 
 #include "../interfaces/emitter.h"
 
@@ -51,7 +52,10 @@ typedef union {
 typedef struct {
 	GbdKeyModifier filter;
 	gboolean is_image;
-	gchar* label;
+	union {
+		gchar* text;
+		GdkPixbuf* image;
+	} label;
 	gboolean is_exec;
 	GbdKeyAction action;
 }	GbdKey;

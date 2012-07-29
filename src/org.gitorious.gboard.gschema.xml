@@ -36,7 +36,7 @@
 	</key>
 	<key name="fontsize" type="d">
 		<range min="0" />
-		<default>0.5</default>
+		<default>0.7</default>
 	</key>
 	<key name="relative" type="b">
 		<default>true</default>

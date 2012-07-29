@@ -98,8 +98,13 @@ static void delete_keygroup( GbdKeyGroup* grp ) {
 	guint i;
 	for( i = 0; i<grp->keycount; i++ ) {
 		GbdKey key = grp->keys[ i ];
-		if( key.label )
-			g_free( key.label );
+		if( key.is_image ) {
+			if( key.label.image )
+				cairo_pattern_destroy( key.label.image );
+		} else {
+			if( key.label.text )
+				g_free( key.label.text );
+		}
 		if( key.is_exec && key.action.exec )
 			g_free( key.action.exec );
 	}
@@ -163,7 +168,6 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 
 	GbdKey* result = g_malloc( sizeof( GbdKey ) );
 	result->is_image = FALSE;
-	result->label = NULL;
 	result->action.action.code = 0;
 	result->action.action.modifier.id = 0;
 
@@ -172,15 +176,33 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 
 	result->is_image = image[ 0 ]!='\0';
 	if( result->is_image ) {
-		result->label = image;
-		g_free( label );
-	} else {
-		if( label[ 0 ]!='\0' )
-			result->label = label;
-		else {
-			result->label = g_strdup( code );
-			g_free( label );
+		GError* err2 = NULL;
+		result->label.image = gdk_pixbuf_new_from_file( image,&err2 );
+		if( !result->label.image ) {
+			g_warning( "Could not load image '%s': %s",image,err2->message );
+			g_error_free( err2 );
 		}
+/* FIXME: Why does label become NULL when an image is found? All other
+ * capture-names are never NULL and only become an empty string if not
+ * found. Why does label behave differently? */
+		if( label )
+			g_free( label );
+		g_free( image );
+	} else {
+		if( label[ 0 ]!='\0' ) {
+			result->label.text = label;
+			gchar* i;
+			gboolean esc = FALSE;
+			for( i = label; *label!='\0'; label++ )
+				if( *label=='\\' && !esc )
+					esc = TRUE;
+				else {
+					*( i++ )= *label;
+					esc = FALSE;
+				}
+			*i = '\0';
+		} else
+			result->label.text = g_strdup( code );
 		g_free( image );
 	}
 
@@ -188,10 +210,8 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 	if( result->is_exec )
 		result->action.exec = exec;
 	else {
-		if( code[ 0 ]!='\0' ) {
-			if( !( result->action.action.code = gbd_emitter_get_code( emitter,code ) ) )
-				g_warning( "Could not find code for key '%s' with label '%s'",code,result->label );
-		}
+		if( code[ 0 ]!='\0' )
+			result->action.action.code = gbd_emitter_get_code( emitter,code ); 
 		result->action.action.modifier = spawn_modifier( modlist,mod );
 		g_free( exec );
 	}
