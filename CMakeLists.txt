@@ -66,9 +66,10 @@ if( GBD_BUILD_GTK_IM )
 endif( )
 
 if( GBD_INSTALL_LAYOUTS )
-	install( DIRECTORY layouts DESTINATION share/gboard )
+	install( DIRECTORY layouts DESTINATION share/gboard/ )
 endif( )
 
 install( TARGETS gboard DESTINATION bin )
 install( FILES "${CMAKE_BINARY_DIR}/org.gitorious.gboard.gschema.xml" DESTINATION "${GBD_SCHEMAS_TARGET}" )
+install( FILES "images/gboard-icon.png" DESTINATION share/gboard/ )
 install( CODE "execute_process( COMMAND glib-compile-schemas \"${GBD_SCHEMAS_TARGET}\" )" )

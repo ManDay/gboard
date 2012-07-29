@@ -29,7 +29,7 @@
 		<default>true</default>
 	</key>
 	<key name="statusicon" type="s">
-		<default>"${CMAKE_INSTALL_PREFIX}/share/gboard/statusicon.svg"</default>
+		<default>"${CMAKE_INSTALL_PREFIX}/share/gboard/gboard-icon.png"</default>
 	</key>
 	<key name="layout" type="s">
 		<default>"${CMAKE_INSTALL_PREFIX}/share/gboard/layouts/de-latin1-short.gboard"</default>

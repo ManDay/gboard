@@ -77,6 +77,8 @@ static gboolean button_press_event( GtkWidget*,GdkEventButton* );
 static gboolean button_release_event( GtkWidget*,GdkEventButton* );
 
 static void remove_active_mod( GbdKeyboard*,const GbdKeyModifier );
+static void release_all_modifiers( GbdKeyboard* );
+static void release_all_keys( GbdKeyboard* );
 static ModElement* is_active_mod( GbdKeyboard*,GbdKeyModifier,gboolean );
 static const generate_cache( GbdKeyboard* );
 static const GbdKey* key_at( GbdKeyboard*,const guint,const guint );
@@ -133,10 +135,14 @@ static void set_property( GObject* _self,guint prop,const GValue* value,GParamSp
 	switch( prop ) {
 	case PROP_LAYOUT:
 		if( priv->layout ) {
+			release_all_keys( GBD_KEYBOARD( _self ) );
+			release_all_modifiers( GBD_KEYBOARD( _self ) );
+
+			g_ptr_array_unref( priv->pressed );
 			g_object_unref( priv->layout );
 			g_ptr_array_unref( priv->cached_groups );
 			g_ptr_array_unref( priv->keycache );
-			g_ptr_array_unref( priv->pressed );
+
 			g_queue_free_full( priv->modstack,g_free );
 		}
 		priv->layout = g_value_dup_object( value );
@@ -251,6 +257,18 @@ static const GbdKey* key_at( GbdKeyboard* self,const guint x,const guint y ) {
 		return g_ptr_array_index( priv->keycache,y*priv->cached_width+x );
 	else
 		return NULL;
+}
+
+static void release_all_modifiers( GbdKeyboard* self ) {
+	GbdKeyboardPrivate* const priv = self->priv;
+
+	guint i;
+	const guint imax = g_queue_get_length( priv->modstack );
+	for( i = 1; i<imax; i++ ) {
+		ModElement* const popmod = g_queue_pop_tail( priv->modstack );
+		gbd_emitter_release( priv->emitter,popmod->key->action.action.code );
+		g_free( popmod );
+	}
 }
 
 static void release_all_keys( GbdKeyboard* self ) {

@@ -100,7 +100,11 @@ static void startup( GApplication* _self ) {
 	GbdAppPrivate* const priv = self->priv;
 
 	g_application_hold( _self );
-	priv->tray = gtk_status_icon_new_from_stock( GTK_STOCK_EDIT );
+
+	gchar* statusicon = g_settings_get_string( priv->settings,"statusicon" );
+	priv->tray = gtk_status_icon_new_from_file( statusicon );
+	g_free( statusicon );
+
 	g_signal_connect( priv->tray,"activate",(GCallback)toggle_board_hnd,self );
 
 	priv->window = GTK_WINDOW( gtk_window_new( GTK_WINDOW_TOPLEVEL ) );
@@ -276,7 +280,11 @@ static void hide_board( GbdApp* self ) {
 static void show_prefs( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 
-	gtk_widget_show( GTK_WIDGET( priv->prefwindow ) );
+	if( priv->prefwindow )
+		gtk_widget_show( GTK_WIDGET( priv->prefwindow ) );
+	else {
+		// Build dialog with Builder
+	}
 }
 
 static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
