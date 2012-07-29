@@ -1,0 +1,3 @@
+[D-BUS Service]
+Names=${GBD_NAME}
+Exec=${CMAKE_INSTALL_PREFIX}/bin/gboard

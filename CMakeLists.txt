@@ -9,6 +9,7 @@ set( GBD_NAME "org.gitorious.gboard" CACHE STRING "Unique dot separated name for
 set( GBD_PATH "/org/gitorious/gboard" CACHE STRING "Unique slash separated path for GBoard - must not end with a slash" )
 set( GBD_SCHEMAS_PATH "share/glib-2.0/schemas" CACHE PATH "Install path for schema definition" )
 set( GBD_GTK_IM_PATH "lib/gtk-3.0/3.0.0" CACHE PATH "Install path for IM Module and associated cache" )
+set( GBD_SERVICE_PATH "share/dbus-1/services" CACHE PATH "Install path for DBUS Service defintion" )
 
 mark_as_advanced( GBD_NAME GBD_PATH )
 
@@ -40,6 +41,8 @@ endif( )
 set( GBD_PATH_TERMED "${GBD_PATH}/" )
 configure_file( src/org.gitorious.gboard.gschema.xml org.gitorious.gboard.gschema.xml )
 configure_file( src/gbd_config.h src/gbd_config.h )
+configure_file( gboard.service gboard.service )
+
 include_directories( "${CMAKE_BINARY_DIR}/src" BEFORE )
 
 add_executable( gboard src/main.c src/classes/app.c src/classes/x11emitter.c src/interfaces/emitter.c src/classes/layout.c src/classes/keyboard.c )
@@ -67,9 +70,11 @@ endif( )
 
 if( GBD_INSTALL_LAYOUTS )
 	install( DIRECTORY layouts DESTINATION share/gboard/ )
+	add_subdirectory( layouts )
 endif( )
 
 install( TARGETS gboard DESTINATION bin )
 install( FILES "${CMAKE_BINARY_DIR}/org.gitorious.gboard.gschema.xml" DESTINATION "${GBD_SCHEMAS_TARGET}" )
 install( FILES "images/gboard-icon.png" DESTINATION share/gboard/ )
+install( FILES "${CMAKE_BINARY_DIR}/gboard.service" DESTINATION "${GBD_SERVICE_PATH}" )
 install( CODE "execute_process( COMMAND glib-compile-schemas \"${GBD_SCHEMAS_TARGET}\" )" )

@@ -16,6 +16,7 @@ struct GbdAppPrivate {
 	GData* layouts;
 	gboolean visible,pen,docked,north;
 	GSettings* settings;
+	GDBusConnection* connection;
 };
 
 GDBusSignalInfo* sinfo[ ] = {
@@ -24,22 +25,28 @@ GDBusSignalInfo* sinfo[ ] = {
 };
 
 GDBusPropertyInfo* pinfo[ ] = {
-	&(GDBusPropertyInfo){ -1,"Visible","y",G_DBUS_PROPERTY_INFO_FLAGS_READABLE },
+	&(GDBusPropertyInfo){ -1,"Visible","b",G_DBUS_PROPERTY_INFO_FLAGS_READABLE },
 	NULL
 };
 
-GDBusInterfaceInfo iinfo = { -1,GBD_NAME,NULL,sinfo,pinfo,NULL };
+GDBusMethodInfo* minfo[ ] = {
+	&(GDBusMethodInfo){ -1,"Show",NULL,NULL,NULL },
+	&(GDBusMethodInfo){ -1,"Hide",NULL,NULL,NULL },
+	NULL
+};
+
+GDBusInterfaceInfo iinfo = { -1,GBD_NAME,minfo,sinfo,pinfo,NULL };
 
 static void class_init( GbdAppClass*,gpointer );
 static void instance_init( GbdApp* );
 static void instance_finalize( GbdApp* );
 
 static void startup( GApplication* );
-static void activate( GApplication* );
 static gint command_line( GApplication*,GApplicationCommandLine* );
 static gboolean dbus_register( GApplication*,GDBusConnection*,const gchar*,GError** );
 static void dbus_unregister( GApplication*,GDBusConnection*,const gchar* );
 
+static void dbus_method_call( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GDBusMethodInvocation*,GbdApp* );
 static GVariant* dbus_property_get( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GError*,gpointer );
 static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*,GVariant*,GError*,gpointer );
 
@@ -50,12 +57,9 @@ static gboolean map_hnd( GtkWidget*,GdkEvent*,GbdApp* );
 static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
 static void activate_layout( GbdApp*,GbdLayout* );
 static void show_prefs( GbdApp* );
-static void show_prefs_hnd( GSimpleAction*,GVariant*,gpointer );
 static void update_regions( GbdKeyboard*,GbdApp* );
 static void toggle_board_hnd( GtkStatusIcon*,GbdApp* );
-static void show_board_hnd( GSimpleAction*,GVariant*,gpointer );
-static void hide_board_hnd( GSimpleAction*,GVariant*,gpointer );
-static gboolean hide_board_hnd2( GtkWidget*,GdkEvent*,GbdApp* );
+static gboolean hide_board_hnd( GtkWidget*,GdkEvent*,GbdApp* );
 
 static void class_init( GbdAppClass* klass,gpointer udata ) {
 	GApplicationClass* klass_ga = G_APPLICATION_CLASS( klass );
@@ -66,7 +70,6 @@ static void class_init( GbdAppClass* klass,gpointer udata ) {
 	klass_go->finalize = (GObjectFinalizeFunc)instance_finalize;
 
 	klass_ga->startup = startup;
-	klass_ga->activate = activate;
 	klass_ga->command_line = command_line;
 
 	// TODO : Comes with Glib-2.34
@@ -78,13 +81,6 @@ static void instance_init( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_APP,GbdAppPrivate );
 
 	priv->settings = g_settings_new( GBD_NAME );
-
-	GActionEntry actions[ ]= {
-		{ "Show",show_board_hnd,"y" },
-		{ "Hide",hide_board_hnd,"b" },
-		{ "Preferences",show_prefs_hnd }
-	};
-	g_action_map_add_action_entries( G_ACTION_MAP( self ),actions,3,self );
 }
 
 static void instance_finalize( GbdApp* self ) {
@@ -113,7 +109,7 @@ static void startup( GApplication* _self ) {
 	gtk_window_set_decorated( priv->window,FALSE );
 	GtkWidget* winwidget = GTK_WIDGET( priv->window );
 
-	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd2,self );
+	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd,self );
 	g_signal_connect( priv->window,"map-event",(GCallback)map_hnd,self );
 
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
@@ -138,11 +134,21 @@ static void startup( GApplication* _self ) {
 	g_free( defaultlayout );
 }
 
-static void activate( GApplication* _self ) {
-	G_APPLICATION_CLASS( g_type_class_peek( GTK_TYPE_APPLICATION ) )->activate( _self );
+static void change_visibility( GbdApp* self,gboolean visibility ) {
+	GbdAppPrivate* const priv = self->priv;
 
-	// TODO - Do we need activation anywhere?
-	g_print( "GBoard activated\n" );
+	priv->visible = visibility;
+
+	GVariantBuilder* builder = g_variant_builder_new( G_VARIANT_TYPE_ARRAY ); 
+	g_variant_builder_add( builder,"{sv}","Visible",g_variant_new_boolean( visibility ) );
+	GVariant* parms = g_variant_new( "(sa{sv}as)",GBD_NAME,builder,NULL );
+	g_variant_builder_unref( builder );
+
+	GError* err = NULL;
+	if( !g_dbus_connection_emit_signal( priv->connection,NULL,GBD_PATH,"org.freedesktop.DBus.Properties","PropertiesChanged",parms,&err ) ) {
+		g_error( "Could not emit signal: %s",err->message );
+		g_error_free( err );
+	}
 }
 
 static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
@@ -161,7 +167,6 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 		show = FALSE;
 
 	GOptionEntry options[ ]= {
-		{ "layout",'l',0,G_OPTION_ARG_FILENAME_ARRAY,&layouts,"Layout to use. Multiple layouts are preloaded, the last is activated.","layout" },
 		{ "force",'f',0,G_OPTION_ARG_NONE,&force,"Force reload of layout. Do not use cached layout.",NULL },
 		{ "hide",'h',0,G_OPTION_ARG_NONE,&hide,"Hide GBoard.",NULL },
 		{ "show",'s',0,G_OPTION_ARG_NONE,&show,"Show GBoard. Use together with -h to redock, if docking is enabled.",NULL },
@@ -173,17 +178,16 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 	GError* err = NULL;
 	if( g_option_context_parse( oc,&argc,&argv,&err ) ) {
 
-		guint i = 0;
+		guint i;
 		GbdLayout* lastvalid = NULL;
-		while( layouts && layouts[ i ] ) {
-			GFile* file = g_file_new_for_commandline_arg( layouts[ i ] );
+		for( i = 1; i<argc; i++ ) {
+			GFile* file = g_file_new_for_commandline_arg( argv[ i ] );
 			if( !load_layout( self,file,force,&err ) ) {
-				g_critical( "GBoard could not parse layoutfile '%s': %s",layouts[ i ],err->message );
+				g_critical( "GBoard could not parse layoutfile '%s': %s",argv[ i ],err->message );
 				g_error_free( err );
 				err = NULL;
 			}
 			g_object_unref( file );
-			i++;
 		}
 		g_strfreev( layouts );
 
@@ -208,22 +212,32 @@ static gboolean dbus_register( GApplication* _self,GDBusConnection* conn,const g
 	g_assert( conn );
 
 	GDBusInterfaceVTable vtable = { 
-		NULL,
+		(GDBusInterfaceMethodCallFunc)dbus_method_call,
 		(GDBusInterfaceGetPropertyFunc)dbus_property_get,
 		(GDBusInterfaceSetPropertyFunc)dbus_property_set
 	};
 
 	g_dbus_connection_register_object( conn,GBD_PATH,&iinfo,&vtable,_self,NULL,NULL );
+	GBD_APP( _self )->priv->connection = conn;
 }
 
 static void dbus_unregister( GApplication* _self,GDBusConnection* conn,const gchar* dbapi ) {
+}
+
+static void dbus_method_call( GDBusConnection* conn,gchar* send,gchar* path,gchar* ifname,gchar* mname,GVariant* parms,GDBusMethodInvocation* minv,GbdApp* self ) {
+	if( !g_strcmp0( mname,"Show" ) )
+		show_board( self );
+	else if( !g_strcmp0( mname,"Hide" ) )
+		hide_board( self );
+
+	g_dbus_method_invocation_return_value( minv,NULL );
 }
 
 static GVariant* dbus_property_get( GDBusConnection* conn,gchar* send,gchar* path,gchar* name,gchar* prop,GError* err,gpointer _self ) {
 	GbdAppPrivate* const priv = GBD_APP( _self )->priv;
 
 	if( !g_strcmp0( prop,"Visible" ) )
-		return g_variant_new( "y",priv->visible?priv->pen?2:1:0 );
+		return g_variant_new( "b",priv->visible );
 
 	return NULL;
 }
@@ -265,14 +279,14 @@ static void activate_layout( GbdApp* self,GbdLayout* layout ) {
 
 static void show_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-	priv->visible = TRUE;
+	change_visibility( self,TRUE );
 
 	gtk_widget_show( GTK_WIDGET( priv->window ) );
 }
 
 static void hide_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-	priv->visible = FALSE;
+	change_visibility( self,FALSE );
 
 	gtk_widget_hide( GTK_WIDGET( priv->window ) );
 }
@@ -316,19 +330,7 @@ static void update_regions( GbdKeyboard* keyboard,GbdApp* self ) {
 	}
 }
 
-static void show_board_hnd( GSimpleAction* action,GVariant* parms,gpointer _self ) {
-	show_board( GBD_APP( _self ) );
-}
-
-static void hide_board_hnd( GSimpleAction* action,GVariant* parms,gpointer _self ) {
-	hide_board( GBD_APP( _self ) );
-}
-
-static void show_prefs_hnd( GSimpleAction* action,GVariant* parms,gpointer _self ) {
-	show_prefs( GBD_APP( _self ) );
-}
-
-static gboolean hide_board_hnd2( GtkWidget* widget,GdkEvent* ev,GbdApp* self ) {
+static gboolean hide_board_hnd( GtkWidget* widget,GdkEvent* ev,GbdApp* self ) {
 	hide_board( self );
 }
 
