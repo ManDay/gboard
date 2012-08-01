@@ -468,8 +468,8 @@ static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier mod ) {
 		for( row = 0; row<priv->cached_height; row++ ) {
 			guint col;
 			for( col = 0; col<priv->cached_width; col++ ) {
-				const GbdKey* key = g_ptr_array_index( priv->keycache,row*priv->cached_width+col );
-				if( key->filter.id==mod.id && gbd_key_is_mod( key ) )
+				const GbdKey* key = key_at( self,col,row );
+				if( key && key->filter.id==mod.id && gbd_key_is_mod( key ) )
 					remove_active_mod( self,key->action.action.modifier );
 			}
 		}

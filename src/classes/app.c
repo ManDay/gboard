@@ -53,7 +53,7 @@ static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*
 static void show_board( GbdApp* );
 static void hide_board( GbdApp* );
 static void configure_window( GbdApp* );
-static gboolean map_hnd( GtkWidget*,GdkEvent*,GbdApp* );
+static void screen_hnd( GdkScreen*,GbdApp* );
 static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
 static void activate_layout( GbdApp*,GbdLayout* );
 static void show_prefs( GbdApp* );
@@ -107,10 +107,9 @@ static void startup( GApplication* _self ) {
 	gtk_window_set_title( priv->window,"GBoard" );
 	gtk_window_set_skip_taskbar_hint( priv->window,TRUE );
 	gtk_window_set_decorated( priv->window,FALSE );
-	GtkWidget* winwidget = GTK_WIDGET( priv->window );
 
 	g_signal_connect( priv->window,"delete-event",(GCallback)hide_board_hnd,self );
-	g_signal_connect( priv->window,"map-event",(GCallback)map_hnd,self );
+	g_signal_connect( gdk_screen_get_default( ),"size-changed",(GCallback)screen_hnd,self );
 
 	priv->emitter = GBD_EMITTER( gbd_x11emitter_new( ) );
 	g_datalist_init( &priv->layouts );
@@ -281,6 +280,7 @@ static void show_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 	change_visibility( self,TRUE );
 
+	configure_window( self );
 	gtk_widget_show( GTK_WIDGET( priv->window ) );
 }
 
@@ -337,6 +337,13 @@ static gboolean hide_board_hnd( GtkWidget* widget,GdkEvent* ev,GbdApp* self ) {
 static void configure_window( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 
+	priv->docked = g_settings_get_boolean( priv->settings,"docked" );
+	priv->north = g_settings_get_boolean( priv->settings,"north" );
+
+	gtk_window_set_accept_focus( priv->window,FALSE );
+	gtk_window_set_keep_above( priv->window,TRUE );
+	gtk_window_stick( priv->window );
+
 	GbdLayout* layout;
 	guint cols,rows;
 
@@ -361,28 +368,16 @@ static void configure_window( GbdApp* self ) {
  * resize & move to fail. I cannot make sense of this, but it seems to
  * work without gravity, so I'll just go with that. */
 	if( priv->docked ) {
-		if( priv->north ) {
+		if( priv->north )
 			gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,0 );
-		} else {
+		else
 			gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,gdk_screen_height( )-height );
-		}
 	}
 	gtk_window_resize( priv->window,width,height );
 }
 
-static gboolean map_hnd( GtkWidget* win,GdkEvent* ev,GbdApp* self ) {
-	GbdAppPrivate* const priv = self->priv;
-
-	priv->docked = g_settings_get_boolean( priv->settings,"docked" );
-	priv->north = g_settings_get_boolean( priv->settings,"north" );
-
-	gtk_window_set_accept_focus( priv->window,FALSE );
-	gtk_window_set_keep_above( priv->window,TRUE );
-	gtk_window_stick( priv->window );
-
+static void screen_hnd( GdkScreen* screen,GbdApp* self ) {
 	configure_window( self );
-
-	return FALSE;
 }
 
 GType gbd_app_get_type( ) {
