@@ -440,16 +440,10 @@ const GbdKey* gbd_key_current( const GbdKeyGroup* grp,GQueue* modstack ) {
 	const guint stacklen = g_queue_get_length( modstack );
 	for( i = 0; i<stacklen; i++ ) {
 		const GbdKeyModifier* const mod = g_queue_peek_nth( modstack,i );
-		const GbdKey* const last = g_queue_peek_tail( results );
 		gboolean undid = FALSE;
 
+/* Account for "No-Mod", indicated by NULL in the stack. */
 		if( mod ) {
-/* The key which was visible at the last level carried a modifier which
- * was subsequently activated: Overrides all subsequent keys and is
- * necessarily visible. */
-			if( last && gbd_key_is_mod( last )&& last->action.action.modifier.id==mod->id && last->action.action.modifier.sticky==mod->sticky )
-				break;
-					
 /* Mod not sticky - might cause inversion on a previous, sticky
  * modifier. */
 			if( !mod->sticky ) {
@@ -476,6 +470,16 @@ const GbdKey* gbd_key_current( const GbdKeyGroup* grp,GQueue* modstack ) {
 			if( searchresult )
 				g_queue_push_tail( results,searchresult );
 		}
+/* The key which was visible at the last level carried a modifier which
+ * was subsequently activated: Overrides all subsequent keys and is
+ * necessarily visible. */
+		const GbdKey* const last = g_queue_peek_tail( results );
+		const GbdKeyModifier* const nextmod = g_queue_peek_nth( modstack,i+1 );
+
+		if( mod && gbd_key_is_mod( last )&&
+			( last->action.action.modifier.id==mod->id && last->action.action.modifier.sticky==mod->sticky ||
+			nextmod && last->action.action.modifier.id==nextmod->id && last->action.action.modifier.sticky==nextmod->sticky	) )
+			break;
 	}
 
 /* Return topmost key on result stack. */
