@@ -122,7 +122,7 @@ static guint64 get_code( GbdEmitter* _self,gchar* key ) {
 		*code = codeval;
 		g_datalist_set_data_full( &priv->mapcache,key,code,g_free );
 		if( !codeval )
-			g_warning( "Could not find code for key '%s', Keysym-Value %i",key,symval );
+			g_warning( "Could not find code for key '%s', Keysym-Value " G_GINT64_FORMAT,key,symval );
 		return codeval;
 	}
 
