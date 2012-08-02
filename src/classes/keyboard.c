@@ -462,6 +462,10 @@ static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier mod ) {
 	}
 
 	guint layer = i+1;
+/* Popping the queue here for subsequent calls to gbd_key_current, but
+ * not yet updating the cache, so that key_at may still obtain the
+ * currently visible keys. */
+	ModElement* const popmod = g_queue_pop_nth( priv->modstack,i );
 
 	while( layer<g_queue_get_length( priv->modstack ) ) {
 		guint row;
@@ -469,16 +473,35 @@ static void remove_active_mod( GbdKeyboard* self,const GbdKeyModifier mod ) {
 			guint col;
 			for( col = 0; col<priv->cached_width; col++ ) {
 				const GbdKey* key = key_at( self,col,row );
-				if( key && key->filter.id==mod.id && gbd_key_is_mod( key ) )
-					remove_active_mod( self,key->action.action.modifier );
+/* Is the key a modifier which depends on the currently release
+ * modifier? If yes, release that modifier, too. The necessary condition
+ * for a key to immediately depend on a modifier is to match the
+ * modifier by filter. The sufficient condition, however, is that it
+ * actually becomes invisible when the modifier is released. And that is
+ * only the case if it's not sustained by a sticky/non-sticky
+ * counterpart of the modifier, which may remain in the stack. In order
+ * to not to dive into a lengthy analysis under which exact
+ * circumstances (s.a. the complicated mechanism of gbd_key_current) and
+ * in particular leave the details to gbd_key_current to decide, we
+ * simply check the necessary condition and if it holds, we compare the
+ * key as it's displayed after release (at this point the modstack is
+ * already popped, s.a.) with the one obtained from before the release.
+ */
+				if( key && key->filter.id==mod.id && gbd_key_is_mod( key ) ) {
+					const GbdKey* const newkey = gbd_key_current( gbd_layout_at( priv->layout,col,row ),priv->modstack );
+					if( newkey!=key )
+						remove_active_mod( self,key->action.action.modifier );
+				}
 			}
 		}
 		layer++;
 	}
 
-	ModElement* const popmod = g_queue_pop_nth( priv->modstack,i );
 	gbd_emitter_release( priv->emitter,popmod->key->action.action.code );
 	g_free( popmod );
+
+/* Consistify cache, now. */
+	generate_cache( self );
 }
 
 static GbdKeyGroup* get_pressed_key( GbdKeyboard* self,guint pointer ) {

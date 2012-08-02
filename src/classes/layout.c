@@ -211,7 +211,8 @@ static GbdKey* parse_key( gchar* str,GPtrArray* modlist,GbdEmitter* emitter,GErr
 		result->action.exec = exec;
 	else {
 		if( code[ 0 ]!='\0' )
-			result->action.action.code = gbd_emitter_get_code( emitter,code ); 
+			if( !( result->action.action.code = gbd_emitter_get_code( emitter,code ) ) )
+				g_warning( "Active emitter could not translate from name '%s'",code );
 		result->action.action.modifier = spawn_modifier( modlist,mod );
 		g_free( exec );
 	}
@@ -443,12 +444,20 @@ const GbdKey* gbd_key_current( const GbdKeyGroup* grp,GQueue* modstack ) {
 		gboolean undid = FALSE;
 
 		if( mod ) {
+/* The key which was visible at the last level carried a modifier which
+ * was subsequently activated: Overrides all subsequent keys and is
+ * necessarily visible. */
 			if( last && gbd_key_is_mod( last )&& last->action.action.modifier.id==mod->id && last->action.action.modifier.sticky==mod->sticky )
 				break;
 					
+/* Mod not sticky - might cause inversion on a previous, sticky
+ * modifier. */
 			if( !mod->sticky ) {
 				guint n;
 				const guint nmax = g_queue_get_length( results );
+/* Check all previously visible keys for one which appeared due to the
+ * sticky version of that very modifier having been pressed and undo it.
+ */
 				for( n = 0; n<nmax; n++ ) {
 					const GbdKey* const nth = g_queue_peek_nth( results,n );
 					if( nth->filter.id==mod->id && nth->filter.sticky ) {
@@ -459,12 +468,17 @@ const GbdKey* gbd_key_current( const GbdKeyGroup* grp,GQueue* modstack ) {
 				}
 			}
 		}
+
+/* If this isn't a non-sticky modifier which undid a previous stick,
+ * push whichever key matches the modifier to the result stack. */
 		if( !undid ) {
 			GbdKey* const searchresult = find_key( grp,mod );
 			if( searchresult )
 				g_queue_push_tail( results,searchresult );
 		}
 	}
+
+/* Return topmost key on result stack. */
 	GbdKey* result = g_queue_peek_tail( results );
 	g_queue_free( results );
 	return result;
