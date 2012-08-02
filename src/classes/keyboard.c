@@ -394,6 +394,7 @@ static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
  * removal.
  */
 	const GbdKeyGroup* const grp = get_pressed_key( self,pointer );
+	g_message( "This line at " __FILE__ ":%i is printed because GBoard is mis-optimized without it! (Sorry for the console spam!)",__LINE__ );
 	set_pressed_key( self,pointer,NULL );
 	if( grp && !is_pressed_key( self,grp ) ) {
 		const GbdKey* const key = key_at( self,grp->col,grp->row );
