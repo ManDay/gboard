@@ -13,11 +13,11 @@
 	</key>
 	<key name="xpadding" type="d">
 		<range min="0" max="1" />
-		<default>0.1</default>
+		<default>0.05</default>
 	</key>
 	<key name="ypadding" type="d">
 		<range min="0" max="1" />
-		<default>0.1</default>
+		<default>0.05</default>
 	</key>
 	<key name="remember" type="b">
 		<default>false</default>

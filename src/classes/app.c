@@ -163,10 +163,12 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 	gboolean force = FALSE,
 		prefs = FALSE,
 		hide = FALSE,
-		show = FALSE;
+		show = FALSE,
+		toggle = FALSE;
 
 	GOptionEntry options[ ]= {
 		{ "force",'f',0,G_OPTION_ARG_NONE,&force,"Force reload of layout. Do not use cached layout.",NULL },
+		{ "toggle",'t',0,G_OPTION_ARG_NONE,&toggle,"Toggle GBoard.",NULL },
 		{ "hide",'h',0,G_OPTION_ARG_NONE,&hide,"Hide GBoard.",NULL },
 		{ "show",'s',0,G_OPTION_ARG_NONE,&show,"Show GBoard. Use together with -h to redock, if docking is enabled.",NULL },
 		{ "preferences",'p',0,G_OPTION_ARG_NONE,&prefs,"Display Preferences dialog.",NULL },
@@ -192,10 +194,17 @@ static gint command_line( GApplication* _self,GApplicationCommandLine* cl ) {
 
 		if( prefs )
 			show_prefs( self );
-		if( hide )
-			hide_board( self );
-		if( show )
-			show_board( self );
+		if( toggle )
+			if( priv->visible )
+				hide_board( self );
+			else
+				show_board( self );
+		else {
+			if( hide )
+				hide_board( self );
+			if( show )
+				show_board( self );
+		}
 	} else {
 		g_error( "GBoard could not parse commandline: %s",err->message );
 		g_error_free( err );
@@ -303,7 +312,7 @@ static void show_prefs( GbdApp* self ) {
 
 static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-	
+
 	if( priv->visible )
 		hide_board( self );
 	else
