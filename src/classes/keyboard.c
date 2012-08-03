@@ -423,16 +423,19 @@ static gboolean button_release_event( GtkWidget* _self,GdkEventButton* ev ) {
 			if( !is_pressed_key( self,NULL ) ) {
 				guint i = 1;
 				guint imax = g_queue_get_length( priv->modstack );
+				gboolean modchanged = FALSE;
 				while( i<imax ) {
 					const ModElement* const el = g_queue_peek_nth( priv->modstack,i );
 					if( !el->mod.sticky ) {
 						gbd_emitter_release( priv->emitter,el->key->action.action.code );
 						g_free( g_queue_pop_nth( priv->modstack,i ) );
 						imax--;
+						modchanged = TRUE;
 					} else
 						i++;
 				}
-				generate_cache( self );
+				if( modchanged )
+					generate_cache( self );
 			}
 		}
 		gtk_widget_queue_draw( _self );

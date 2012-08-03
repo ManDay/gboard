@@ -1,9 +1,9 @@
 {{dead_circumflex ^}s{degree °}o{Escape Esc}} {{1}s{exclam !}o{F1}} {{2}s{quotedbl "}g{twosuperior ²}o{F2}} {{3}s{paragraph §}g{threesuperior ³}o{F3}} {{4}s{dollar $}o{F4}} {{5}s{percent %}o{F5}} {{6}s{ampersand &}o{F6}} {{7}s{slash /}g{braceleft \{}o{F7}} {{8}s{parenleft \(}g{bracketleft [}o{F8}} {{9}s{parenright \)}g{bracketright ]}o{F9}} {{0}s{equal =}g{braceright \}}o{F10}} {{ssharp ß}s{question ?}g{backslash \\}o{F11}} {{dead_breve '}s{dead_grave `}o{F12}} {{BackSpace ⇐}}}} {{Delete Enf}s{Insert Efg}__}
 
-{Tab}} {{q}S{Q}} {{w}S{W}} {{e}S{E}g{EuroSign €}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{dead_tilde ~}} {} {{Return ↵}__}
+{Tab}} {{q}S{Q}g{at @}} {{w}S{W}} {{e}S{E}g{EuroSign €}} {{r}S{R}} {{t}S{T}} {{z}S{Z}} {{u}S{U}} {{i}S{I}} {{o}S{O}} {{p}S{P}} {{udiaeresis ü}S{Udiaeresis Ü}} {{plus +}S{asterisk *}g{dead_tilde ~}} {} {{Return ↵}__}
 
 {{{Caps_Lock S} ⇓ Lock}}}} {{a}S{A}} {{s}S{S}} {{d}S{D}} {{f}S{F}} {{g}S{G}} {{h}S{H}} {{j}S{J}} {{k}S{K}} {{l}S{L}} {{odiaeresis ö}S{Odiaeresis Ö}} {{adiaeresis ä}S{Adiaeresis Ä}} {{numbersign #}S{apostrophe '}} {Page_Up Pu}
 
 {{{Shift_L s} ⇑}}} {{less <}s{greater >}g{bar |}} {{y}S{Y}} {{x}S{X}} {{c}S{C}} {{v}S{V}} {{b}S{B}} {{n}S{N}} {{m}S{M}g{mu µ}} {{comma ,}s{semicolon ;}} {{period .}s{colon :}} {{minus -}s{underscore _}} {{{Shift_R s} ⇑}}} {Up ↑} {Page_Down Pd}
 
-{{{Control_L c} Strg}}} {{{Super_L w} □}}} {{{Meta_L m} Alt}}} {{space  }o{(gboard -h) Hide…}}}}}}}}}} {{{ISO_Level3_Shift g} Alt Gr}o{(gboard -p) (/usr/share/icons/LowContrast/48x48/stock/gtk-preferences.png)}}} {{{o} GBD ©}}}} {Left ←} {Down ↓} {Right →}
+{{{Control_L c} Strg}}} {{{Super_L w} □}o{(gboard -h) (/usr/share/icons/LowContrast/48x48/stock/go-bottom.png)}}} {{{Alt_L m} Alt}o{(gboard ${CMAKE_INSTALL_PREFIX}/share/gboard/layouts/de-latin1-mini.gboard) (/usr/share/icons/LowContrast/48x48/stock/zoom-out.png)}}} {{space  }}}}}}}}}} {{{ISO_Level3_Shift g} Alt Gr}o{(gboard -p) (/usr/share/icons/LowContrast/48x48/stock/gtk-preferences.png)}}} {{{o} …}}}} {Left ←} {Down ↓} {Right →}

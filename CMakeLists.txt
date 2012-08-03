@@ -69,7 +69,8 @@ if( GBD_BUILD_GTK_IM )
 endif( )
 
 if( GBD_INSTALL_LAYOUTS )
-	install( DIRECTORY layouts DESTINATION share/gboard/ )
+# Install all layouts individually from subdirectory
+#	install( DIRECTORY layouts DESTINATION share/gboard/ )
 	add_subdirectory( layouts )
 endif( )
 
