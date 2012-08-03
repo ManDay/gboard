@@ -10,32 +10,38 @@
 struct GbdAppPrivate {
 	GtkStatusIcon* tray;
 	GtkWindow* window;
-	GtkWindow* prefwindow;
+	GtkDialog* prefwindow;
 	GbdEmitter* emitter;
 	GbdKeyboard* keyboard;
 	GData* layouts;
-	gboolean visible,pen,docked,north;
+	gboolean visible;
 	GSettings* settings;
+	GdkPixbuf* icon;
 	GDBusConnection* connection;
+
+	/// Cached settings
+	gboolean shaped,hardhide,reset,north;
 };
 
-GDBusSignalInfo* sinfo[ ] = {
+static GDBusSignalInfo* sinfo[ ] = {
 	&(GDBusSignalInfo){ -1,"Submit",(GDBusArgInfo*[ ]){ &(GDBusArgInfo){ -1,"Text","s" },NULL } },
 	NULL
 };
 
-GDBusPropertyInfo* pinfo[ ] = {
+static GDBusPropertyInfo* pinfo[ ] = {
 	&(GDBusPropertyInfo){ -1,"Visible","b",G_DBUS_PROPERTY_INFO_FLAGS_READABLE },
 	NULL
 };
 
-GDBusMethodInfo* minfo[ ] = {
+static GDBusMethodInfo* minfo[ ] = {
 	&(GDBusMethodInfo){ -1,"Show",NULL,NULL,NULL },
 	&(GDBusMethodInfo){ -1,"Hide",NULL,NULL,NULL },
 	NULL
 };
 
-GDBusInterfaceInfo iinfo = { -1,GBD_NAME,minfo,sinfo,pinfo,NULL };
+static GDBusInterfaceInfo iinfo = { -1,GBD_NAME,minfo,sinfo,pinfo,NULL };
+
+static GdkPixbuf* iconpixbuf;
 
 static void class_init( GbdAppClass*,gpointer );
 static void instance_init( GbdApp* );
@@ -53,7 +59,12 @@ static gboolean* dbus_property_set( GDBusConnection*,gchar*,gchar*,gchar*,gchar*
 static void show_board( GbdApp* );
 static void hide_board( GbdApp* );
 static void configure_window( GbdApp* );
+static void prefs_hnd( GSettings*,gchar*,GbdApp* );
+static void file_set_hnd( GtkFileChooserButton*,GbdApp* );
 static void screen_hnd( GdkScreen*,GbdApp* );
+static gboolean close_pref_hnd( GtkButton*,GdkEvent*,GbdApp* );
+static void close_pref_hnd2( GtkButton*,GbdApp* );
+static void confirm_pref_hnd( GtkButton*,GbdApp* );
 static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
 static void activate_layout( GbdApp*,GbdLayout* );
 static void show_prefs( GbdApp* );
@@ -86,6 +97,9 @@ static void instance_init( GbdApp* self ) {
 static void instance_finalize( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 	g_object_unref( priv->settings );
+	g_object_unref( priv->tray );
+	if( priv->icon )
+		g_object_unref( priv->icon );
 
 	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->finalize( G_OBJECT( self ) );
 }
@@ -98,8 +112,10 @@ static void startup( GApplication* _self ) {
 	g_application_hold( _self );
 
 	gchar* statusicon = g_settings_get_string( priv->settings,"statusicon" );
-	priv->tray = gtk_status_icon_new_from_file( statusicon );
+	priv->icon = gdk_pixbuf_new_from_file( statusicon,NULL );
 	g_free( statusicon );
+
+	priv->tray = gtk_status_icon_new_from_pixbuf( priv->icon );
 
 	g_signal_connect( priv->tray,"activate",(GCallback)toggle_board_hnd,self );
 
@@ -124,13 +140,24 @@ static void startup( GApplication* _self ) {
 	g_settings_bind( priv->settings,"fontsize",priv->keyboard,"fontsize",G_SETTINGS_BIND_DEFAULT );
 	g_settings_bind( priv->settings,"relative",priv->keyboard,"relative",G_SETTINGS_BIND_DEFAULT );
 
+	priv->reset = g_settings_get_boolean( priv->settings,"reset" );
+	priv->north = g_settings_get_boolean( priv->settings,"north" );
+	priv->shaped = g_settings_get_boolean( priv->settings,"shaped" );
+	priv->hardhide = g_settings_get_boolean( priv->settings,"hardhide" );
+	g_signal_connect( priv->settings,"changed",(GCallback)prefs_hnd,self );
+
 	g_signal_connect( priv->keyboard,"mask-change",(GCallback)update_regions,_self );
 
 	gchar* defaultlayout = g_settings_get_string( priv->settings,"layout" );
-	GFile* file = g_file_new_for_path( defaultlayout );
+	GFile* file = g_file_new_for_uri( defaultlayout );
 	load_layout( self,file,FALSE,NULL );
 	g_object_unref( file );
 	g_free( defaultlayout );
+
+	if( !priv->hardhide ) {
+		gtk_window_iconify( priv->window );
+		gtk_widget_show( GTK_WIDGET( priv->window ) );
+	}
 }
 
 static void change_visibility( GbdApp* self,gboolean visibility ) {
@@ -289,25 +316,129 @@ static void show_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 	change_visibility( self,TRUE );
 
-	configure_window( self );
-	gtk_widget_show( GTK_WIDGET( priv->window ) );
+	if( priv->reset )
+		configure_window( self );
+
+	if( !priv->hardhide )
+		gtk_window_deiconify( priv->window );
+	else
+		gtk_widget_show( GTK_WIDGET( priv->window ) );
 }
 
 static void hide_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 	change_visibility( self,FALSE );
 
-	gtk_widget_hide( GTK_WIDGET( priv->window ) );
+	if( priv->hardhide )
+		gtk_widget_hide( GTK_WIDGET( priv->window ) );
+	else
+		gtk_window_iconify( priv->window );
 }
 
 static void show_prefs( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 
-	if( priv->prefwindow )
-		gtk_widget_show( GTK_WIDGET( priv->prefwindow ) );
-	else {
-		// Build dialog with Builder
+	if( !priv->prefwindow ) {
+		GtkBuilder* builder = gtk_builder_new( );
+		GError* err = NULL;
+		if( !gtk_builder_add_from_file( builder,GBD_GUIDEF,&err ) ) {
+			g_error( "Could not load GtkBuilder definitions: %s'",err->message );
+			g_error_free( err );
+			return;
+		}
+		priv->prefwindow = GTK_DIALOG( gtk_builder_get_object( builder,"window" ) );
+
+		gtk_window_set_icon( GTK_WINDOW( priv->prefwindow ),priv->icon );
+
+		g_signal_connect( priv->prefwindow,"delete-event",(GCallback)close_pref_hnd,self );
+		g_signal_connect( gtk_builder_get_object( builder,"cancel" ),"clicked",(GCallback)close_pref_hnd2,self );
+		g_signal_connect( gtk_builder_get_object( builder,"ok" ),"clicked",(GCallback)confirm_pref_hnd,self );
+
+
+		GtkWidget* reset = GTK_WIDGET( gtk_builder_get_object( builder,"reset" ) );
+		GtkWidget* north = GTK_WIDGET( gtk_builder_get_object( builder,"north" ) );
+		GtkFileChooser* fc = GTK_FILE_CHOOSER( gtk_builder_get_object( builder,"layout" ) );
+
+		gchar* const uri = g_settings_get_string( priv->settings,"layout" );
+		gtk_file_chooser_set_uri( fc,uri );
+		g_free( uri );
+		g_signal_connect( fc,"file-set",(GCallback)file_set_hnd,self );
+
+
+		g_object_bind_property( reset,"active",north,"sensitive",G_BINDING_DEFAULT|G_BINDING_SYNC_CREATE );
+
+		g_settings_delay( priv->settings );
+		g_settings_bind( priv->settings,"reset",reset,"active",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"north",north,"active",G_SETTINGS_BIND_DEFAULT|G_SETTINGS_BIND_NO_SENSITIVITY );
+		g_settings_bind( priv->settings,"xpadding",gtk_builder_get_object( builder,"xpadding" ),"value",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"ypadding",gtk_builder_get_object( builder,"ypadding" ),"value",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"keywidth",gtk_builder_get_object( builder,"keywidth" ),"value",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"keyheight",gtk_builder_get_object( builder,"keyheight" ),"value",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"fontsize",gtk_builder_get_object( builder,"fontsize" ),"value",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"maxheight",gtk_builder_get_object( builder,"maxheight" ),"value",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"relative",gtk_builder_get_object( builder,"relative" ),"active",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"leftmenu",gtk_builder_get_object( builder,"leftmenu" ),"active",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"shaped",gtk_builder_get_object( builder,"shaped" ),"active",G_SETTINGS_BIND_DEFAULT );
+		g_settings_bind( priv->settings,"hardhide",gtk_builder_get_object( builder,"hardhide" ),"active",G_SETTINGS_BIND_DEFAULT );
+
+		gtk_widget_show_all( GTK_WIDGET( priv->prefwindow ) );
+
+		g_object_unref( builder );
 	}
+}
+
+static void prefs_hnd( GSettings* settings,gchar* key,GbdApp* self ) {
+	GbdAppPrivate* const priv = self->priv;
+
+	if( !g_strcmp0( key,"shaped" ) ) {
+		priv->shaped = g_settings_get_boolean( priv->settings,"shaped" );
+		GdkWindow* win;
+		if( priv->shaped )
+			update_regions( priv->keyboard,self );
+		else if( win = gtk_widget_get_window( GTK_WIDGET( priv->window ) ) )
+			gdk_window_shape_combine_region( win,NULL,0,0 );
+	} else if( !g_strcmp0( key,"keywidth" )|| !g_strcmp0( key,"keyheight" ) )
+		configure_window( self );
+	else if( !g_strcmp0( key,"hardhide" ) ) {
+		priv->hardhide = g_settings_get_boolean( priv->settings,"hardhide" );
+		if( !priv->visible )
+			if( priv->hardhide )
+				gtk_widget_hide( GTK_WIDGET( priv->window ) );
+			else {
+				gtk_window_iconify( priv->window );
+				gtk_widget_show( GTK_WIDGET( priv->window ) );
+			}
+	} else if( !g_strcmp0( key,"reset" ) )
+		priv->reset = g_settings_get_boolean( priv->settings,"reset" );
+	else if( !g_strcmp0( key,"north" ) )
+		priv->north = g_settings_get_boolean( priv->settings,"north" );
+}
+
+static void file_set_hnd( GtkFileChooserButton* widget,GbdApp* self ) {
+	gchar* uri = gtk_file_chooser_get_uri( GTK_FILE_CHOOSER( widget ) );
+	g_settings_set_string( self->priv->settings,"layout",uri );
+	g_free( uri );
+}
+
+static gboolean close_pref_hnd( GtkButton* button,GdkEvent* ev,GbdApp* self ) {
+	g_settings_revert( self->priv->settings );
+	self->priv->prefwindow = NULL;
+
+	return FALSE;
+}
+
+static void close_pref_hnd2( GtkButton* button,GbdApp* self ) {
+	gtk_widget_destroy( GTK_WIDGET( self->priv->prefwindow ) );
+
+	g_settings_revert( self->priv->settings );
+	self->priv->prefwindow = NULL;
+}
+
+static void confirm_pref_hnd( GtkButton* button,GbdApp* self ) {
+	gtk_widget_destroy( GTK_WIDGET( self->priv->prefwindow ) );
+
+	g_settings_apply( self->priv->settings );
+	self->priv->prefwindow = NULL;
 }
 
 static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
@@ -331,11 +462,13 @@ static void toggle_board_hnd( GtkStatusIcon* icon,GbdApp* self ) {
  * twice, which is a good thing.
  */
 static void update_regions( GbdKeyboard* keyboard,GbdApp* self ) {
-	cairo_region_t* regions = gbd_keyboard_regions( keyboard );
-	GdkWindow* win;
-	if( regions &&( win = gtk_widget_get_window( GTK_WIDGET( self->priv->window ) ) ) ) {
-		gdk_window_shape_combine_region( win,regions,0,0 );
-		cairo_region_destroy( regions );
+	if( self->priv->shaped ) {
+		cairo_region_t* regions = gbd_keyboard_regions( keyboard );
+		GdkWindow* win;
+		if( regions &&( win = gtk_widget_get_window( GTK_WIDGET( self->priv->window ) ) ) ) {
+			gdk_window_shape_combine_region( win,regions,0,0 );
+			cairo_region_destroy( regions );
+		}
 	}
 }
 
@@ -345,9 +478,6 @@ static gboolean hide_board_hnd( GtkWidget* widget,GdkEvent* ev,GbdApp* self ) {
 
 static void configure_window( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-
-	priv->docked = g_settings_get_boolean( priv->settings,"docked" );
-	priv->north = g_settings_get_boolean( priv->settings,"north" );
 
 	gtk_window_set_accept_focus( priv->window,FALSE );
 	gtk_window_set_keep_above( priv->window,TRUE );
@@ -376,12 +506,10 @@ static void configure_window( GbdApp* self ) {
  * which it docks makes sense. In fact, trying to do that will cause the
  * resize & move to fail. I cannot make sense of this, but it seems to
  * work without gravity, so I'll just go with that. */
-	if( priv->docked ) {
-		if( priv->north )
-			gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,0 );
-		else
-			gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,gdk_screen_height( )-height );
-	}
+	if( priv->north )
+		gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,0 );
+	else
+		gtk_window_move( priv->window,gdk_screen_width( )/2-width/2,gdk_screen_height( )-height );
 	gtk_window_resize( priv->window,width,height );
 }
 

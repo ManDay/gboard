@@ -76,6 +76,6 @@ endif( )
 
 install( TARGETS gboard DESTINATION bin )
 install( FILES "${CMAKE_BINARY_DIR}/org.gitorious.gboard.gschema.xml" DESTINATION "${GBD_SCHEMAS_TARGET}" )
-install( FILES "images/gboard-icon.png" DESTINATION share/gboard/ )
+install( FILES "images/gboard-icon.png" "src/preferences.builder" DESTINATION share/gboard/ )
 install( FILES "${CMAKE_BINARY_DIR}/gboard.service" DESTINATION "${GBD_SERVICE_PATH}" )
 install( CODE "execute_process( COMMAND glib-compile-schemas \"${GBD_SCHEMAS_TARGET}\" )" )
