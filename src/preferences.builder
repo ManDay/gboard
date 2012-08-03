@@ -108,9 +108,6 @@
 		<child><object class="GtkCheckButton" id="relative">
 			<property name="label">Fontsize relative fraction</property>
 		</object></child>
-		<child><object class="GtkCheckButton" id="leftmenu">
-			<property name="label">Menu on Systray-Left-Click</property>
-		</object></child>
 		<child><object class="GtkCheckButton" id="shaped">
 			<property name="label">Window Shaping</property>
 		</object></child>

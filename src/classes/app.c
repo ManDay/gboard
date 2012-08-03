@@ -18,6 +18,7 @@ struct GbdAppPrivate {
 	GSettings* settings;
 	GdkPixbuf* icon;
 	GDBusConnection* connection;
+	GtkMenu* menu;
 
 	/// Cached settings
 	gboolean shaped,hardhide,reset,north;
@@ -61,8 +62,10 @@ static void hide_board( GbdApp* );
 static void configure_window( GbdApp* );
 static void prefs_hnd( GSettings*,gchar*,GbdApp* );
 static void file_set_hnd( GtkFileChooserButton*,GbdApp* );
+static gboolean popup_hnd( GtkStatusIcon*,guint,guint,GbdApp* );
 static void screen_hnd( GdkScreen*,GbdApp* );
 static gboolean close_pref_hnd( GtkButton*,GdkEvent*,GbdApp* );
+static void connect_popup_signals( GtkBuilder*,GObject*,const gchar*,const gchar*,GObject*,GConnectFlags,GbdApp* );
 static void close_pref_hnd2( GtkButton*,GbdApp* );
 static void confirm_pref_hnd( GtkButton*,GbdApp* );
 static gboolean load_layout( GbdApp*,GFile*,gboolean,GError** );
@@ -90,16 +93,18 @@ static void class_init( GbdAppClass* klass,gpointer udata ) {
 
 static void instance_init( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv = G_TYPE_INSTANCE_GET_PRIVATE( self,GBD_TYPE_APP,GbdAppPrivate );
-
-	priv->settings = g_settings_new( GBD_NAME );
 }
 
 static void instance_finalize( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
-	g_object_unref( priv->settings );
-	g_object_unref( priv->tray );
-	if( priv->icon )
-		g_object_unref( priv->icon );
+
+/// Settings being set indicates this is the primary instance
+	if( priv->settings ) {
+		g_object_unref( priv->settings );
+		g_object_unref( priv->tray );
+		if( priv->icon )
+			g_object_unref( priv->icon );
+	}
 
 	G_OBJECT_CLASS( g_type_class_peek( G_TYPE_OBJECT ) )->finalize( G_OBJECT( self ) );
 }
@@ -109,7 +114,7 @@ static void startup( GApplication* _self ) {
 	GbdApp* const self = GBD_APP( _self );
 	GbdAppPrivate* const priv = self->priv;
 
-	g_application_hold( _self );
+	priv->settings = g_settings_new( GBD_NAME );
 
 	gchar* statusicon = g_settings_get_string( priv->settings,"statusicon" );
 	priv->icon = gdk_pixbuf_new_from_file( statusicon,NULL );
@@ -118,6 +123,20 @@ static void startup( GApplication* _self ) {
 	priv->tray = gtk_status_icon_new_from_pixbuf( priv->icon );
 
 	g_signal_connect( priv->tray,"activate",(GCallback)toggle_board_hnd,self );
+	g_signal_connect( priv->tray,"popup-menu",(GCallback)popup_hnd,self );
+
+	GtkBuilder* builder = gtk_builder_new( );
+	GError* err = NULL;
+	if( !gtk_builder_add_from_file( builder,GBD_POPUPDEF,&err ) ) {
+		g_error( "Could not load GtkBuilder definitions: %s'",err->message );
+		g_error_free( err );
+		return;
+	}
+	priv->menu = g_object_ref( GTK_MENU( gtk_builder_get_object( builder,"menu" ) ) );
+	gtk_builder_connect_signals_full( builder,(GtkBuilderConnectFunc)connect_popup_signals,self );
+	gtk_widget_show_all( GTK_WIDGET( priv->menu ) );
+
+	g_object_unref( builder );
 
 	priv->window = GTK_WINDOW( gtk_window_new( GTK_WINDOW_TOPLEVEL ) );
 	gtk_window_set_title( priv->window,"GBoard" );
@@ -154,10 +173,47 @@ static void startup( GApplication* _self ) {
 	g_object_unref( file );
 	g_free( defaultlayout );
 
+	gtk_application_add_window( GTK_APPLICATION( _self ),priv->window );
+
 	if( !priv->hardhide ) {
 		gtk_window_iconify( priv->window );
 		gtk_widget_show( GTK_WIDGET( priv->window ) );
 	}
+}
+
+static void popup_menu_hnd( GtkMenuItem* item,GbdApp* self ) {
+	gchar* label;
+	g_object_get( item,"label",&label,NULL );
+
+	if( !g_strcmp0( label,"gtk-preferences" ) )
+		show_prefs( self );
+	else if( !g_strcmp0( label,"gtk-about" ) ) {
+		const gchar* authors[ ]= { "Cedric Sodhi <manday@gmx.net>",NULL };
+
+		gtk_show_about_dialog( NULL,
+			"program-name","GBoard",
+			"license-type",GTK_LICENSE_GPL_2_0,
+			"logo",self->priv->icon,
+			"version",GBD_VERSION,
+			"website","http://gitorious.org/gbd",
+			"website-label","Hosted on Gitorious",
+			"wrap-license",TRUE,
+			"authors",authors,
+			"comments","Lightweight, simple, and flexible on-screen-keyboard written in GTK.",
+			"copyright","As by GPL-2 License",NULL );
+	} else if( !g_strcmp0( label,"gtk-quit" ) )
+		g_application_quit( G_APPLICATION( self ) );
+	else
+		if( self->priv->visible )
+			hide_board( self );
+		else
+			show_board( self );
+	
+	g_free( label );
+}
+
+static void connect_popup_signals( GtkBuilder* build,GObject* obj,const gchar* sig,const gchar* handler,GObject* target,GConnectFlags flags,GbdApp* self ) {
+	g_signal_connect( obj,sig,(GCallback)popup_menu_hnd,self );
 }
 
 static void change_visibility( GbdApp* self,gboolean visibility ) {
@@ -312,6 +368,10 @@ static void activate_layout( GbdApp* self,GbdLayout* layout ) {
 	configure_window( self );
 }
 
+static gboolean popup_hnd( GtkStatusIcon* icon,guint button,guint t,GbdApp* self ) {
+	gtk_menu_popup( self->priv->menu,NULL,NULL,gtk_status_icon_position_menu,icon,button,t );
+}
+
 static void show_board( GbdApp* self ) {
 	GbdAppPrivate* const priv = self->priv;
 	change_visibility( self,TRUE );
@@ -377,7 +437,6 @@ static void show_prefs( GbdApp* self ) {
 		g_settings_bind( priv->settings,"fontsize",gtk_builder_get_object( builder,"fontsize" ),"value",G_SETTINGS_BIND_DEFAULT );
 		g_settings_bind( priv->settings,"maxheight",gtk_builder_get_object( builder,"maxheight" ),"value",G_SETTINGS_BIND_DEFAULT );
 		g_settings_bind( priv->settings,"relative",gtk_builder_get_object( builder,"relative" ),"active",G_SETTINGS_BIND_DEFAULT );
-		g_settings_bind( priv->settings,"leftmenu",gtk_builder_get_object( builder,"leftmenu" ),"active",G_SETTINGS_BIND_DEFAULT );
 		g_settings_bind( priv->settings,"shaped",gtk_builder_get_object( builder,"shaped" ),"active",G_SETTINGS_BIND_DEFAULT );
 		g_settings_bind( priv->settings,"hardhide",gtk_builder_get_object( builder,"hardhide" ),"active",G_SETTINGS_BIND_DEFAULT );
 

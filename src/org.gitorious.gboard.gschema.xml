@@ -47,7 +47,4 @@
 	<key name="shaped" type="b">
 		<default>true</default>
 	</key>
-	<key name="leftmenu" type="b">
-		<default>false</default>
-	</key>
 </schema></schemalist>
