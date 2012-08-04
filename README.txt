@@ -2,7 +2,7 @@ GBoard - Simple, flexible, on-screen keyboard
 
 Author: Cedric Sodhi <manday@gmx.net>
 
-URL: gitorious.org/gbd/gboard
+URL: github.com/ManDay/gboard
 
 === LICENSE
 
@@ -243,18 +243,9 @@ depending on the current device, with which the mouse is controlled.
 Until then, a small list of rather trivial things remains to be done on
 GBoard's currently available keyboard, namely:
 
-* Add a preferences dialog for editing the associated GSettings. In
-  particular the Docking-Configuration needs a bit of attention.
-
 * Improve the X11-Emitter to keep track of pressed modifier keys
   (internally), so that it will be able to emit any keysym irrespective
 	of the currently pressed modifiers.
-
-* Add a context menu to the status icon, providing quick access to
-  important features, such as terminating GBoard or showing the
-	preferences dialog.
-
-* Link transparency of the window to the associated GSetting.
 
 * Optional: Add Wayland emitter.
 
